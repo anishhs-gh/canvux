@@ -1,0 +1,11 @@
+# build output
+/canvux
+dist/
+
+# editor artifacts
+*.autosave
+*.tmp
+
+# generated exports (demo.png is kept for the README)
+examples/demo.svg
+DEV_*.md
