@@ -36,11 +36,27 @@
     { "id": 13, "kind": "path",
       "points": [ { "x": 62, "y": 24 }, { "x": 65, "y": 21 }, { "x": 69, "y": 26 },
                   { "x": 73, "y": 20 }, { "x": 77, "y": 27 }, { "x": 81, "y": 22 }, { "x": 84, "y": 25 } ],
+      "widths": [ 0.5, 1.0, 1.8, 2.6, 1.8, 1.0, 0.5 ],
       "stroke": "#f7768e", "fill": "#000000", "strokeWidth": 1.5, "opacity": 1, "layer": 1 },
     { "id": 14, "kind": "text", "p1": { "x": 60, "y": 29 }, "text": "freehand brush", "stroke": "#565f89",
       "fill": "#000000", "strokeWidth": 1, "opacity": 1, "layer": 1 },
     { "id": 15, "kind": "line", "p1": { "x": 4, "y": 16 }, "p2": { "x": 86, "y": 16 },
-      "stroke": "#3a4052", "fill": "#000000", "strokeWidth": 0.5, "opacity": 1, "dashed": true, "layer": 1 }
+      "stroke": "#3a4052", "fill": "#000000", "strokeWidth": 0.5, "opacity": 1, "dashed": true, "layer": 1 },
+    { "id": 16, "kind": "rect", "p1": { "x": 4, "y": 44 }, "p2": { "x": 26, "y": 54 },
+      "stroke": "#7aa2f7", "fill": "#7aa2f7", "fill2": "#bb9af7", "gradAngle": 45,
+      "filled": true, "shadow": true, "strokeWidth": 1, "opacity": 1, "layer": 1 },
+    { "id": 17, "kind": "text", "p1": { "x": 7, "y": 48 }, "text": "gradient", "stroke": "#10121a",
+      "fill": "#000000", "strokeWidth": 1, "opacity": 1, "layer": 1 },
+    { "id": 18, "kind": "bezier",
+      "p1": { "x": 32, "y": 54 }, "c1": { "x": 40, "y": 40 }, "c2": { "x": 46, "y": 58 }, "p2": { "x": 54, "y": 44 },
+      "stroke": "#9ece6a", "fill": "#000000", "strokeWidth": 1.2, "opacity": 1, "layer": 1 },
+    { "id": 19, "kind": "text", "p1": { "x": 38, "y": 55 }, "text": "bezier", "stroke": "#565f89",
+      "fill": "#000000", "strokeWidth": 1, "opacity": 1, "layer": 1 },
+    { "id": 20, "kind": "ellipse", "p1": { "x": 60, "y": 44 }, "p2": { "x": 76, "y": 54 },
+      "stroke": "#ff9e64", "fill": "#ff9e64", "filled": true, "blur": 1.6,
+      "strokeWidth": 1, "opacity": 0.9, "layer": 1 },
+    { "id": 21, "kind": "text", "p1": { "x": 64, "y": 55 }, "text": "blur", "stroke": "#565f89",
+      "fill": "#000000", "strokeWidth": 1, "opacity": 1, "layer": 1 }
   ],
   "metadata": { "title": "Canvux demo", "created": "2026-07-23" }
 }

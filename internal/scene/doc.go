@@ -186,6 +186,12 @@ func Unmarshal(data []byte) (*Doc, error) {
 		if o.Layer < 0 || o.Layer >= len(d.Layers) {
 			o.Layer = 0
 		}
+		if o.Widths != nil && len(o.Widths) != len(o.Points) {
+			o.Widths = nil // corrupt/hand-edited; fall back to uniform width
+		}
+		if o.Blur < 0 {
+			o.Blur = 0
+		}
 	}
 	if d.nextID == 0 {
 		d.nextID = 1

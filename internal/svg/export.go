@@ -13,6 +13,12 @@ import (
 
 // Export renders the document's visible objects as an SVG file.
 func Export(d *scene.Doc) []byte {
+	var body, defs strings.Builder
+	for _, o := range d.VisibleObjects() {
+		writeDefs(&defs, o)
+		writeObject(&body, o)
+	}
+
 	var b strings.Builder
 	bounds := d.ContentBounds().Expand(4)
 	if bounds.W() <= 0 || bounds.H() <= 0 {
@@ -23,11 +29,39 @@ func Export(d *scene.Doc) []byte {
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="%s %s %s %s" width="%s" height="%s">`+"\n",
 		f(bounds.Min.X), f(bounds.Min.Y), f(bounds.W()), f(bounds.H()), f(bounds.W()*8), f(bounds.H()*8))
 	b.WriteString("  <desc>Created with Canvux</desc>\n")
-	for _, o := range d.VisibleObjects() {
-		writeObject(&b, o)
+	if defs.Len() > 0 {
+		b.WriteString("  <defs>\n" + defs.String() + "  </defs>\n")
 	}
+	b.WriteString(body.String())
 	b.WriteString("</svg>\n")
 	return []byte(b.String())
+}
+
+// writeDefs emits the object's gradient and filter definitions, if any.
+func writeDefs(b *strings.Builder, o *scene.Object) {
+	if o.Fill2 != nil && o.Filled {
+		ang := o.GradAngle * math.Pi / 180
+		if o.GradAngle == 0 {
+			ang = math.Pi / 2
+		}
+		ux, uy := math.Cos(ang), math.Sin(ang)
+		fmt.Fprintf(b, `    <linearGradient id="grad%d" x1="%s" y1="%s" x2="%s" y2="%s">`+"\n",
+			o.ID, f(0.5-ux/2), f(0.5-uy/2), f(0.5+ux/2), f(0.5+uy/2))
+		fmt.Fprintf(b, `      <stop offset="0" stop-color="%s"/>`+"\n", o.Fill.Hex())
+		fmt.Fprintf(b, `      <stop offset="1" stop-color="%s"/>`+"\n", o.Fill2.Hex())
+		b.WriteString("    </linearGradient>\n")
+	}
+	if o.Shadow || o.Blur > 0 {
+		fmt.Fprintf(b, `    <filter id="fx%d" x="-40%%" y="-40%%" width="180%%" height="180%%">`+"\n", o.ID)
+		if o.Shadow {
+			fmt.Fprintf(b, `      <feDropShadow dx="%s" dy="%s" stdDeviation="0.8" flood-color="#050609" flood-opacity="0.45"/>`+"\n",
+				f(1.2), f(1.2))
+		}
+		if o.Blur > 0 {
+			fmt.Fprintf(b, `      <feGaussianBlur stdDeviation="%s"/>`+"\n", f(o.Blur/2))
+		}
+		b.WriteString("    </filter>\n")
+	}
 }
 
 func writeObject(b *strings.Builder, o *scene.Object) {
@@ -41,6 +75,9 @@ func writeObject(b *strings.Builder, o *scene.Object) {
 	case scene.KindLine:
 		fmt.Fprintf(b, `  <line x1="%s" y1="%s" x2="%s" y2="%s"%s%s/>`+"\n",
 			f(o.P1.X), f(o.P1.Y), f(o.P2.X), f(o.P2.Y), style, tr)
+	case scene.KindBezier:
+		fmt.Fprintf(b, `  <path d="M %s %s C %s %s, %s %s, %s %s"%s%s/>`+"\n",
+			f(o.P1.X), f(o.P1.Y), f(o.C1.X), f(o.C1.Y), f(o.C2.X), f(o.C2.Y), f(o.P2.X), f(o.P2.Y), style, tr)
 	case scene.KindArrow:
 		fmt.Fprintf(b, `  <g%s%s>`+"\n", style, tr)
 		fmt.Fprintf(b, `    <line x1="%s" y1="%s" x2="%s" y2="%s"/>`+"\n",
@@ -61,24 +98,51 @@ func writeObject(b *strings.Builder, o *scene.Object) {
 	case scene.KindPolygon:
 		fmt.Fprintf(b, `  <polygon points="%s"%s%s/>`+"\n", pointList(o.Points), style, tr)
 	case scene.KindPath:
-		fmt.Fprintf(b, `  <polyline points="%s"%s%s/>`+"\n", pointList(o.Points), style, tr)
+		if len(o.Widths) == len(o.Points) && len(o.Points) > 1 {
+			writeVariableWidthPath(b, o, tr)
+		} else {
+			fmt.Fprintf(b, `  <polyline points="%s"%s%s/>`+"\n", pointList(o.Points), style, tr)
+		}
 	case scene.KindText:
-		fmt.Fprintf(b, `  <text x="%s" y="%s" font-family="monospace" font-size="2" fill="%s"%s%s>%s</text>`+"\n",
-			f(o.P1.X), f(o.P1.Y+1.6), o.Stroke.Hex(), opacityAttr(o), tr, escape(o.Text))
+		fmt.Fprintf(b, `  <text x="%s" y="%s" font-family="monospace" font-size="2" fill="%s"%s%s%s>%s</text>`+"\n",
+			f(o.P1.X), f(o.P1.Y+1.6), o.Stroke.Hex(), opacityAttr(o), filterAttr(o), tr, escape(o.Text))
 	}
+}
+
+// writeVariableWidthPath splits a variable-width brush stroke into runs of
+// similar width, one polyline each, so the taper survives export.
+func writeVariableWidthPath(b *strings.Builder, o *scene.Object, tr string) {
+	fmt.Fprintf(b, `  <g stroke="%s" fill="none" stroke-linecap="round" stroke-linejoin="round"%s%s%s>`+"\n",
+		o.Stroke.Hex(), opacityAttr(o), filterAttr(o), tr)
+	quant := func(w float64) float64 { return math.Round(w*4) / 4 }
+	start := 0
+	for i := 1; i < len(o.Points); i++ {
+		if i == len(o.Points)-1 || quant(o.Widths[i]) != quant(o.Widths[start]) {
+			run := o.Points[start : i+1]
+			fmt.Fprintf(b, `    <polyline points="%s" stroke-width="%s"/>`+"\n",
+				pointList(run), f(math.Max(0.2, quant(o.Widths[start]))))
+			start = i
+		}
+	}
+	b.WriteString("  </g>\n")
 }
 
 func styleAttrs(o *scene.Object) string {
 	var b strings.Builder
 	fill := "none"
 	if o.Filled {
-		fill = o.Fill.Hex()
+		if o.Fill2 != nil {
+			fill = fmt.Sprintf("url(#grad%d)", o.ID)
+		} else {
+			fill = o.Fill.Hex()
+		}
 	}
 	fmt.Fprintf(&b, ` fill="%s" stroke="%s" stroke-width="%s"`, fill, o.Stroke.Hex(), f(o.StrokeWidth))
 	if o.Dashed {
 		b.WriteString(` stroke-dasharray="2 2"`)
 	}
 	b.WriteString(opacityAttr(o))
+	b.WriteString(filterAttr(o))
 	b.WriteString(` stroke-linecap="round" stroke-linejoin="round"`)
 	return b.String()
 }
@@ -86,6 +150,13 @@ func styleAttrs(o *scene.Object) string {
 func opacityAttr(o *scene.Object) string {
 	if o.Opacity < 1 {
 		return fmt.Sprintf(` opacity="%s"`, f(o.Opacity))
+	}
+	return ""
+}
+
+func filterAttr(o *scene.Object) string {
+	if o.Shadow || o.Blur > 0 {
+		return fmt.Sprintf(` filter="url(#fx%d)"`, o.ID)
 	}
 	return ""
 }

@@ -59,6 +59,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.setTool(ToolArrow)
 	case "p":
 		m.setTool(ToolPolygon)
+	case "n":
+		m.setTool(ToolBezier)
 	case "t":
 		m.setTool(ToolText)
 	case "x":
@@ -129,6 +131,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.cmdToggleFill()
 	case "D":
 		return m.cmdToggleDash()
+	case "S":
+		return m.cmdToggleShadow()
+	case "B":
+		return m.cmdBlur(0.5)
+	case "ctrl+b":
+		return m.cmdBlur(-0.5)
 	case "w":
 		return m.cmdStrokeWidth(0.5)
 	case "W":
@@ -151,6 +159,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.palSel = 0
 	case "L":
 		m.overlay = ovLayers
+	case "i":
+		m.overlay = ovStencils
+		m.stencilQry = ""
+		m.stencilSel = 0
 	case "?":
 		m.overlay = ovHelp
 		m.helpTop = 0
@@ -324,6 +336,38 @@ func (m *Model) handleOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		return m.colorKey(key)
 	case ovLayers:
 		return m.layersKey(key)
+	case ovStencils:
+		return m.stencilKey(msg)
+	}
+	return nil
+}
+
+func (m *Model) stencilKey(msg tea.KeyMsg) tea.Cmd {
+	items := m.filteredStencils()
+	switch msg.String() {
+	case "up", "ctrl+k":
+		m.stencilSel = maxInt(0, m.stencilSel-1)
+	case "down", "ctrl+j":
+		m.stencilSel = minInt(maxInt(0, len(items)-1), m.stencilSel+1)
+	case "enter":
+		m.overlay = ovNone
+		if m.stencilSel < len(items) {
+			return m.insertStencil(items[m.stencilSel])
+		}
+	case "backspace":
+		r := []rune(m.stencilQry)
+		if len(r) > 0 {
+			m.stencilQry = string(r[:len(r)-1])
+		}
+		m.stencilSel = 0
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.stencilQry += string(msg.Runes)
+			m.stencilSel = 0
+		} else if msg.Type == tea.KeySpace {
+			m.stencilQry += " "
+			m.stencilSel = 0
+		}
 	}
 	return nil
 }
@@ -406,6 +450,24 @@ func (m *Model) colorKey(key string) tea.Cmd {
 			m.filled = true
 		}
 		m.overlay = ovNone
+	case "g":
+		// Fill picker: apply the highlighted color as the gradient end color.
+		if m.overlay == ovColorFill {
+			idx := m.colorSel
+			m.applyStyle("gradient", func(o *scene.Object) {
+				c := Palette[idx]
+				o.Fill2 = &c
+				o.Filled = true
+			})
+			m.overlay = ovNone
+			m.setStatus(statusOK, "gradient end color set (%s)", Palette[idx].Hex())
+		}
+	case "x":
+		if m.overlay == ovColorFill {
+			m.applyStyle("clear gradient", func(o *scene.Object) { o.Fill2 = nil })
+			m.overlay = ovNone
+			m.setStatus(statusInfo, "gradient cleared")
+		}
 	default:
 		if len(key) == 1 && key[0] >= '1' && key[0] <= '9' && int(key[0]-'1') < n {
 			m.colorSel = int(key[0] - '1')

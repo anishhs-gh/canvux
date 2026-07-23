@@ -27,6 +27,7 @@ const (
 	ToolEllipse
 	ToolArrow
 	ToolPolygon
+	ToolBezier
 	ToolText
 	ToolEraser
 )
@@ -34,7 +35,7 @@ const (
 var toolNames = map[Tool]string{
 	ToolSelect: "select", ToolPan: "pan", ToolBrush: "brush", ToolLine: "line",
 	ToolRect: "rect", ToolEllipse: "ellipse", ToolArrow: "arrow",
-	ToolPolygon: "polygon", ToolText: "text", ToolEraser: "eraser",
+	ToolPolygon: "polygon", ToolBezier: "curve", ToolText: "text", ToolEraser: "eraser",
 }
 
 // dragKind describes the in-flight mouse gesture.
@@ -73,6 +74,7 @@ const (
 	ovColorStroke
 	ovColorFill
 	ovLayers
+	ovStencils
 )
 
 // promptState is a single-line input on the status row.
@@ -113,6 +115,8 @@ type Model struct {
 	strokeWidth float64
 	dashed      bool
 	opacity     float64
+	shadow      bool
+	varBrush    bool // speed-sensitive variable-width brush
 
 	sel      map[uint64]bool
 	drag     dragState
@@ -126,16 +130,18 @@ type Model struct {
 	showGrid bool
 	snap     bool
 
-	overlay   overlayKind
-	palQuery  string
-	palSel    int
-	colorSel  int
-	layerSel  int
-	helpTop   int
-	prompt    *promptState
-	statusMsg string
-	statusLvl statusLevel
-	statusAt  time.Time
+	overlay    overlayKind
+	palQuery   string
+	palSel     int
+	colorSel   int
+	layerSel   int
+	helpTop    int
+	stencilSel int
+	stencilQry string
+	prompt     *promptState
+	statusMsg  string
+	statusLvl  statusLevel
+	statusAt   time.Time
 
 	mouseCell  struct{ X, Y int }
 	mouseWorld geom.Vec
@@ -265,6 +271,7 @@ func (m *Model) newObject(kind scene.Kind) *scene.Object {
 		StrokeWidth: m.strokeWidth,
 		Opacity:     m.opacity,
 		Dashed:      m.dashed,
+		Shadow:      m.shadow,
 		Layer:       m.currentLayer(),
 	}
 }

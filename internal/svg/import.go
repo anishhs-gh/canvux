@@ -96,6 +96,17 @@ func elementToObject(el xml.StartElement) (*scene.Object, bool) {
 	case "polyline":
 		o.Kind = scene.KindPath
 		o.Points = parsePoints(get("points"))
+	case "path":
+		pts, closed := flattenPathD(get("d"))
+		if len(pts) < 2 {
+			return nil, false
+		}
+		if closed {
+			o.Kind = scene.KindPolygon
+		} else {
+			o.Kind = scene.KindPath
+		}
+		o.Points = pts
 	case "polygon":
 		o.Kind = scene.KindPolygon
 		o.Points = parsePoints(get("points"))
@@ -200,4 +211,157 @@ func parsePoints(s string) []geom.Vec {
 		}
 	}
 	return pts
+}
+
+// flattenPathD converts an SVG path `d` attribute into a polyline, flattening
+// curves. Supports M/m, L/l, H/h, V/v, C/c, Q/q, Z/z; anything else aborts.
+// Returns the points and whether the path was closed.
+func flattenPathD(d string) ([]geom.Vec, bool) {
+	toks := tokenizePath(d)
+	var pts []geom.Vec
+	var cur, start geom.Vec
+	closed := false
+	i := 0
+	next := func() (float64, bool) {
+		if i < len(toks) {
+			if v, err := strconv.ParseFloat(toks[i], 64); err == nil {
+				i++
+				return v, true
+			}
+		}
+		return 0, false
+	}
+	pair := func() (geom.Vec, bool) {
+		x, ok1 := next()
+		y, ok2 := next()
+		return geom.V(x, y), ok1 && ok2
+	}
+	cmd := ""
+	for i < len(toks) {
+		t := toks[i]
+		isLetter := len(t) == 1 && (t[0] >= 'A' && t[0] <= 'Z' || t[0] >= 'a' && t[0] <= 'z')
+		if isLetter {
+			if !strings.ContainsAny(t, "MmLlHhVvCcQqZz") {
+				return nil, false // arcs, S/T shorthands: unsupported
+			}
+			cmd = t
+			i++
+		} else if cmd == "" {
+			return nil, false
+		}
+		rel := cmd >= "a" // lowercase = relative
+		switch strings.ToUpper(cmd) {
+		case "M", "L":
+			p, ok := pair()
+			if !ok {
+				return pts, closed
+			}
+			if rel {
+				p = p.Add(cur)
+			}
+			cur = p
+			if strings.ToUpper(cmd) == "M" && len(pts) == 0 {
+				start = p
+			}
+			pts = append(pts, p)
+			if strings.ToUpper(cmd) == "M" {
+				cmd = strings.Replace(cmd, "M", "L", 1)
+				cmd = strings.Replace(cmd, "m", "l", 1)
+			}
+		case "H", "V":
+			v, ok := next()
+			if !ok {
+				return pts, closed
+			}
+			p := cur
+			if strings.ToUpper(cmd) == "H" {
+				if rel {
+					p.X += v
+				} else {
+					p.X = v
+				}
+			} else {
+				if rel {
+					p.Y += v
+				} else {
+					p.Y = v
+				}
+			}
+			cur = p
+			pts = append(pts, p)
+		case "C":
+			c1, ok1 := pair()
+			c2, ok2 := pair()
+			end, ok3 := pair()
+			if !ok1 || !ok2 || !ok3 {
+				return pts, closed
+			}
+			if rel {
+				c1, c2, end = c1.Add(cur), c2.Add(cur), end.Add(cur)
+			}
+			pts = append(pts, flattenCubic(cur, c1, c2, end, 16)...)
+			cur = end
+		case "Q":
+			c1, ok1 := pair()
+			end, ok2 := pair()
+			if !ok1 || !ok2 {
+				return pts, closed
+			}
+			if rel {
+				c1, end = c1.Add(cur), end.Add(cur)
+			}
+			// Elevate quadratic to cubic.
+			cc1 := cur.Add(c1.Sub(cur).Mul(2.0 / 3.0))
+			cc2 := end.Add(c1.Sub(end).Mul(2.0 / 3.0))
+			pts = append(pts, flattenCubic(cur, cc1, cc2, end, 12)...)
+			cur = end
+		case "Z":
+			closed = true
+			cur = start
+		default:
+			return nil, false // arcs, S/T shorthands: unsupported
+		}
+	}
+	return pts, closed
+}
+
+func flattenCubic(p0, c1, c2, p1 geom.Vec, n int) []geom.Vec {
+	out := make([]geom.Vec, n)
+	for k := 1; k <= n; k++ {
+		t := float64(k) / float64(n)
+		u := 1 - t
+		out[k-1] = geom.V(
+			u*u*u*p0.X+3*u*u*t*c1.X+3*u*t*t*c2.X+t*t*t*p1.X,
+			u*u*u*p0.Y+3*u*u*t*c1.Y+3*u*t*t*c2.Y+t*t*t*p1.Y,
+		)
+	}
+	return out
+}
+
+// tokenizePath splits a path data string into command letters and numbers.
+func tokenizePath(d string) []string {
+	var toks []string
+	var num strings.Builder
+	flush := func() {
+		if num.Len() > 0 {
+			toks = append(toks, num.String())
+			num.Reset()
+		}
+	}
+	for _, r := range d {
+		switch {
+		case r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z':
+			flush()
+			toks = append(toks, string(r))
+		case r == ' ' || r == ',' || r == '\n' || r == '\t' || r == '\r':
+			flush()
+		case r == '-' && num.Len() > 0 && !strings.HasSuffix(num.String(), "e"):
+			flush()
+			num.WriteRune(r)
+		default:
+			num.WriteRune(r)
+		}
+	}
+	flush()
+	return toks
 }

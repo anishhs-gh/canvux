@@ -35,6 +35,7 @@ func commands() []Command {
 		{"Tool: Ellipse", "e", func(m *Model) tea.Cmd { m.setTool(ToolEllipse); return nil }},
 		{"Tool: Arrow", "a", func(m *Model) tea.Cmd { m.setTool(ToolArrow); return nil }},
 		{"Tool: Polygon", "p", func(m *Model) tea.Cmd { m.setTool(ToolPolygon); return nil }},
+		{"Tool: Curve (bézier)", "n", func(m *Model) tea.Cmd { m.setTool(ToolBezier); return nil }},
 		{"Tool: Text", "t", func(m *Model) tea.Cmd { m.setTool(ToolText); return nil }},
 		{"Tool: Eraser", "x", func(m *Model) tea.Cmd { m.setTool(ToolEraser); return nil }},
 		{"Save", "ctrl+s", (*Model).cmdSave},
@@ -58,6 +59,31 @@ func commands() []Command {
 		{"Fill Color…", "C", func(m *Model) tea.Cmd { m.overlay = ovColorFill; m.colorSel = m.fillIdx; return nil }},
 		{"Toggle Fill", "f", (*Model).cmdToggleFill},
 		{"Toggle Dashed", "D", (*Model).cmdToggleDash},
+		{"Toggle Shadow", "S", (*Model).cmdToggleShadow},
+		{"Blur +", "B", func(m *Model) tea.Cmd { return m.cmdBlur(0.5) }},
+		{"Blur -", "ctrl+b", func(m *Model) tea.Cmd { return m.cmdBlur(-0.5) }},
+		{"Gradient: Pick End Color…", "C then g", func(m *Model) tea.Cmd {
+			m.overlay = ovColorFill
+			m.colorSel = m.fillIdx
+			m.setStatus(statusInfo, "pick a color, press g to set it as the gradient end")
+			return nil
+		}},
+		{"Gradient: Clear", "C then x", func(m *Model) tea.Cmd {
+			m.applyStyle("clear gradient", func(o *scene.Object) { o.Fill2 = nil })
+			return nil
+		}},
+		{"Gradient: Rotate +45°", "", (*Model).cmdGradAngle},
+		{"Brush: Toggle Variable Width", "", func(m *Model) tea.Cmd {
+			m.varBrush = !m.varBrush
+			m.setStatus(statusInfo, "variable-width brush: %v", m.varBrush)
+			return nil
+		}},
+		{"Insert Stencil…", "i", func(m *Model) tea.Cmd {
+			m.overlay = ovStencils
+			m.stencilQry = ""
+			m.stencilSel = 0
+			return nil
+		}},
 		{"Stroke Width +", "+w", func(m *Model) tea.Cmd { return m.cmdStrokeWidth(0.5) }},
 		{"Stroke Width -", "-w", func(m *Model) tea.Cmd { return m.cmdStrokeWidth(-0.5) }},
 		{"Opacity +10%", "", func(m *Model) tea.Cmd { return m.cmdOpacity(0.1) }},
@@ -417,6 +443,41 @@ func (m *Model) cmdToggleDash() tea.Cmd {
 	m.dashed = !m.dashed
 	m.applyStyle("dash", func(o *scene.Object) { o.Dashed = m.dashed })
 	m.setStatus(statusInfo, "dashed: %v", m.dashed)
+	return nil
+}
+
+func (m *Model) cmdToggleShadow() tea.Cmd {
+	m.shadow = !m.shadow
+	m.applyStyle("shadow", func(o *scene.Object) { o.Shadow = m.shadow })
+	m.setStatus(statusInfo, "shadow: %v", m.shadow)
+	return nil
+}
+
+func (m *Model) cmdBlur(d float64) tea.Cmd {
+	if len(m.sel) == 0 {
+		m.setStatus(statusInfo, "select objects to blur")
+		return nil
+	}
+	m.applyStyle("blur", func(o *scene.Object) {
+		o.Blur = math.Max(0, math.Min(4, o.Blur+d))
+	})
+	if objs := m.selection(); len(objs) > 0 {
+		m.setStatus(statusInfo, "blur: %.1f", objs[0].Blur)
+	}
+	return nil
+}
+
+func (m *Model) cmdGradAngle() tea.Cmd {
+	if len(m.sel) == 0 {
+		m.setStatus(statusInfo, "select gradient objects first")
+		return nil
+	}
+	m.applyStyle("gradient angle", func(o *scene.Object) {
+		if o.Fill2 != nil {
+			o.GradAngle = math.Mod(o.GradAngle+45, 360)
+		}
+	})
+	m.setStatus(statusInfo, "gradient rotated +45°")
 	return nil
 }
 

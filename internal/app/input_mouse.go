@@ -100,15 +100,20 @@ func (m *Model) mousePress(msg tea.MouseMsg) tea.Cmd {
 	case ToolBrush:
 		m.draft = m.newObject(scene.KindPath)
 		m.draft.Points = []geom.Vec{w}
+		if m.varBrush {
+			m.draft.Widths = []float64{m.strokeWidth}
+		}
 		m.drag = dragState{kind: dragDraw, start: w, last: w, button: msg.Button}
-	case ToolLine, ToolRect, ToolEllipse, ToolArrow:
+	case ToolLine, ToolRect, ToolEllipse, ToolArrow, ToolBezier:
 		kinds := map[Tool]scene.Kind{
 			ToolLine: scene.KindLine, ToolRect: scene.KindRect,
 			ToolEllipse: scene.KindEllipse, ToolArrow: scene.KindArrow,
+			ToolBezier: scene.KindBezier,
 		}
 		p := m.maybeSnap(w)
 		m.draft = m.newObject(kinds[m.tool])
 		m.draft.P1, m.draft.P2 = p, p
+		m.draft.C1, m.draft.C2 = p, p
 		m.drag = dragState{kind: dragDraw, start: p, last: p, button: msg.Button}
 	case ToolPolygon:
 		m.polygonClick(w, dbl)
@@ -168,15 +173,25 @@ func (m *Model) selectPress(w geom.Vec, shift, dbl bool) {
 	m.drag = dragState{kind: dragMove, start: w, last: w}
 }
 
-// handleAt returns the resize-handle index (0..3, clockwise from top-left)
-// under world point w, or -1. Handles only exist for a single selection.
+// handleAt returns the handle index under world point w, or -1. Handles only
+// exist for a single selection: 0..3 are bounds corners (clockwise from
+// top-left); for béziers, 4 and 5 are the C1/C2 control points.
 func (m *Model) handleAt(w geom.Vec) int {
 	objs := m.selection()
 	if len(objs) != 1 {
 		return -1
 	}
-	b := objs[0].Bounds()
 	tol := 4 / m.view().Zoom
+	// Control points win over corners so overlapping handles stay editable.
+	if objs[0].Kind == scene.KindBezier {
+		if w.Dist(objs[0].C1) <= tol {
+			return 4
+		}
+		if w.Dist(objs[0].C2) <= tol {
+			return 5
+		}
+	}
+	b := objs[0].Bounds()
 	for i, c := range b.Corners() {
 		if w.Dist(c) <= tol {
 			return i
@@ -252,11 +267,26 @@ func (m *Model) mouseMotion(msg tea.MouseMsg) tea.Cmd {
 			break
 		}
 		if m.draft.Kind == scene.KindPath {
-			if len(m.draft.Points) == 0 || w.Dist(m.draft.Points[len(m.draft.Points)-1]) > 0.5/m.view().Zoom {
+			last := m.draft.Points[len(m.draft.Points)-1]
+			if w.Dist(last) > 0.5/m.view().Zoom {
 				m.draft.Points = append(m.draft.Points, w)
+				if m.draft.Widths != nil {
+					// Speed-sensitive width: fast strokes thin out, slow
+					// strokes thicken — simulated brush pressure.
+					pxDist := w.Dist(m.drag.last) * m.view().Zoom
+					f := math.Max(0.35, math.Min(1.6, 1.7-pxDist*0.10))
+					prev := m.draft.Widths[len(m.draft.Widths)-1]
+					m.draft.Widths = append(m.draft.Widths, prev*0.6+m.strokeWidth*f*0.4)
+				}
 			}
 		} else {
 			m.draft.P2 = m.constrained(m.maybeSnap(w), msg.Shift)
+			if m.draft.Kind == scene.KindBezier {
+				// Start as a straight curve; handles are edited afterwards.
+				d := m.draft.P2.Sub(m.draft.P1)
+				m.draft.C1 = m.draft.P1.Add(d.Mul(1.0 / 3.0))
+				m.draft.C2 = m.draft.P1.Add(d.Mul(2.0 / 3.0))
+			}
 		}
 		m.drag.last = w
 	case dragMove:
@@ -294,7 +324,7 @@ func (m *Model) constrained(p geom.Vec, shift bool) geom.Vec {
 	case scene.KindRect, scene.KindEllipse:
 		s := math.Max(math.Abs(d.X), math.Abs(d.Y))
 		return m.draft.P1.Add(geom.V(math.Copysign(s, d.X), math.Copysign(s, d.Y)))
-	case scene.KindLine, scene.KindArrow:
+	case scene.KindLine, scene.KindArrow, scene.KindBezier:
 		ang := math.Round(math.Atan2(d.Y, d.X)/(math.Pi/4)) * (math.Pi / 4)
 		return m.draft.P1.Add(geom.V(math.Cos(ang), math.Sin(ang)).Mul(d.Len()))
 	}
@@ -307,9 +337,24 @@ func (m *Model) applyResize(w geom.Vec) {
 		return
 	}
 	if !m.drag.pushed {
-		m.checkpoint("resize")
+		label := "resize"
+		if m.drag.handle >= 4 {
+			label = "curve"
+		}
+		m.checkpoint(label)
 		m.drag.pushed = true
 		// re-fetch: checkpoint clones the doc into history but obj stays live
+	}
+	// Bézier control-point handles reposition C1/C2 directly.
+	if m.drag.handle >= 4 && obj.Kind == scene.KindBezier {
+		p := m.maybeSnap(w)
+		if m.drag.handle == 4 {
+			obj.C1 = p
+		} else {
+			obj.C2 = p
+		}
+		m.dirty = true
+		return
 	}
 	b := obj.Bounds()
 	corners := b.Corners()

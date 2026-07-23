@@ -129,3 +129,56 @@ func TestVersionGuard(t *testing.T) {
 		t.Error("expected error for future format version")
 	}
 }
+
+func TestBezier(t *testing.T) {
+	o := &Object{
+		Kind: KindBezier, Stroke: Color{R: 255}, StrokeWidth: 1, Opacity: 1,
+		P1: geom.V(0, 0), C1: geom.V(0, 10), C2: geom.V(10, 10), P2: geom.V(10, 0),
+	}
+	pts := o.BezierPoints(24)
+	if pts[0] != o.P1 || pts[24] != o.P2 {
+		t.Error("bezier endpoints wrong")
+	}
+	b := o.Bounds()
+	if b.Max.Y < 5 || b.Max.Y > 8 {
+		t.Errorf("bezier bulge bounds = %v, want max.Y ~7.5", b)
+	}
+	// The curve passes near (5, 7.5) at t=0.5.
+	if !o.Hit(geom.V(5, 7.5), 0.6) {
+		t.Error("expected hit on curve midpoint")
+	}
+	if o.Hit(geom.V(5, 0), 0.4) {
+		t.Error("chord midpoint should not hit the bowed curve")
+	}
+	// Translate must carry control points.
+	o.Translate(geom.V(100, 0))
+	if o.C1.X != 100 {
+		t.Errorf("Translate ignored C1: %v", o.C1)
+	}
+}
+
+func TestCloneDeepCopiesPhase9Fields(t *testing.T) {
+	f2 := Color{G: 9}
+	o := &Object{Kind: KindPath, Points: []geom.Vec{{X: 1}}, Widths: []float64{2}, Fill2: &f2}
+	c := o.Clone()
+	c.Widths[0] = 99
+	c.Fill2.G = 99
+	if o.Widths[0] == 99 || o.Fill2.G == 99 {
+		t.Error("Clone shares Widths or Fill2")
+	}
+}
+
+func TestUnmarshalDropsMismatchedWidths(t *testing.T) {
+	d := NewDoc()
+	o := &Object{Kind: KindPath, Points: []geom.Vec{{X: 1}, {X: 2}}, Widths: []float64{1},
+		Stroke: Color{}, StrokeWidth: 1, Opacity: 1}
+	d.Add(o)
+	data, _ := d.Marshal()
+	got, err := Unmarshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Objects[0].Widths != nil {
+		t.Error("mismatched widths should be dropped on load")
+	}
+}

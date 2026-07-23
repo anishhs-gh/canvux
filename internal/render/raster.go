@@ -45,36 +45,122 @@ func (v View) WorldRect() geom.Rect {
 	return geom.R(v.ToWorld(geom.V(0, 0)), v.ToWorld(geom.V(float64(v.W), float64(v.H))))
 }
 
-// DrawObject rasterizes one object into the surface.
+// ShadowOffset is the drop-shadow displacement in world units.
+const ShadowOffset = 1.2
+
+// shadowColor is the color shadows are cast in.
+var shadowColor = scene.Color{R: 0x05, G: 0x06, B: 0x09}
+
+// DrawObject rasterizes one object into the surface, including its shadow
+// and blur effects.
 func DrawObject(s Surface, v View, o *scene.Object) {
 	if o.Kind == scene.KindText {
 		return // text is composited at the cell layer, not the pixel layer
 	}
-	if !o.Bounds().Expand(o.StrokeWidth).Intersects(v.WorldRect()) {
+	pad := o.StrokeWidth + o.Blur + ShadowOffset + 1
+	if !o.Bounds().Expand(pad).Intersects(v.WorldRect()) {
 		return
 	}
-	a := clamp01(o.Opacity)
+	if o.Shadow {
+		sh := o.Clone()
+		sh.Shadow = false
+		sh.Fill2 = nil
+		sh.Stroke, sh.Fill = shadowColor, shadowColor
+		sh.Opacity = clamp01(o.Opacity) * 0.45
+		sh.Blur = math.Max(o.Blur, 0.8) // shadows are always a little soft
+		sh.Translate(geom.V(ShadowOffset, ShadowOffset))
+		drawBlurred(s, v, sh)
+	}
+	drawBlurred(s, v, o)
+}
+
+// drawBlurred approximates gaussian blur by stamping jittered, faded copies.
+func drawBlurred(s Surface, v View, o *scene.Object) {
+	if o.Blur <= 0 {
+		drawCore(s, v, o, 1)
+		return
+	}
+	r := o.Blur
+	offsets := []geom.Vec{
+		{X: 0, Y: 0},
+		{X: r, Y: 0}, {X: -r, Y: 0}, {X: 0, Y: r}, {X: 0, Y: -r},
+		{X: r * 0.7, Y: r * 0.7}, {X: -r * 0.7, Y: r * 0.7},
+		{X: r * 0.7, Y: -r * 0.7}, {X: -r * 0.7, Y: -r * 0.7},
+	}
+	for _, off := range offsets {
+		c := o.Clone()
+		c.Blur = 0
+		c.Translate(off)
+		drawCore(s, v, c, 0.28)
+	}
+}
+
+// drawCore rasterizes the object's fill, stroke and arrowhead.
+func drawCore(s Surface, v View, o *scene.Object, alphaScale float64) {
+	a := clamp01(o.Opacity) * alphaScale
 	if fp := o.FillPolygon(); fp != nil {
 		px := make([]geom.Vec, len(fp))
 		for i, p := range fp {
 			px[i] = v.ToPixel(p)
 		}
-		fillPolygon(s, px, o.Fill, a)
+		if o.Fill2 != nil {
+			fillPolygonFunc(s, px, gradientFn(o, px), a)
+		} else {
+			fillPolygon(s, px, o.Fill, a)
+		}
 	}
 	thick := math.Max(1, o.StrokeWidth*v.Zoom/2)
+	var widths []float64
+	if o.Kind == scene.KindPath && len(o.Widths) == len(o.Points) {
+		widths = o.Widths
+	}
 	for _, ln := range o.Outline() {
-		drawPolyline(s, v, ln, o.Stroke, a, thick, o.Dashed)
+		drawPolyline(s, v, ln, widths, o.Stroke, a, thick, o.Dashed)
 	}
 	if o.Kind == scene.KindArrow {
 		drawArrowhead(s, v, o, a)
 	}
 }
 
-func drawPolyline(s Surface, v View, pts []geom.Vec, c scene.Color, a, thick float64, dashed bool) {
+// gradientFn builds a per-pixel color function for a linear gradient across
+// the pixel-space polygon's bounding box along GradAngle.
+func gradientFn(o *scene.Object, px []geom.Vec) func(x, y int) scene.Color {
+	ang := o.GradAngle * math.Pi / 180
+	if o.GradAngle == 0 {
+		ang = math.Pi / 2 // default: top-to-bottom
+	}
+	u := geom.V(math.Cos(ang), math.Sin(ang))
+	lo, hi := math.Inf(1), math.Inf(-1)
+	for _, p := range px {
+		d := p.Dot(u)
+		lo, hi = math.Min(lo, d), math.Max(hi, d)
+	}
+	span := hi - lo
+	if span <= 0 {
+		span = 1
+	}
+	c1, c2 := o.Fill, *o.Fill2
+	return func(x, y int) scene.Color {
+		t := clamp01((geom.V(float64(x), float64(y)).Dot(u) - lo) / span)
+		return scene.Color{
+			R: uint8(float64(c1.R) + (float64(c2.R)-float64(c1.R))*t),
+			G: uint8(float64(c1.G) + (float64(c2.G)-float64(c1.G))*t),
+			B: uint8(float64(c1.B) + (float64(c2.B)-float64(c1.B))*t),
+		}
+	}
+}
+
+// drawPolyline strokes a polyline; widths, when non-nil, holds a per-point
+// world-space stroke width (variable-width brush strokes).
+func drawPolyline(s Surface, v View, pts []geom.Vec, widths []float64, c scene.Color, a, thick float64, dashed bool) {
 	dashPhase := 0.0
 	for i := 0; i+1 < len(pts); i++ {
 		p1, p2 := v.ToPixel(pts[i]), v.ToPixel(pts[i+1])
-		dashPhase = drawLine(s, p1, p2, c, a, thick, dashed, dashPhase)
+		t := thick
+		if widths != nil && i+1 < len(widths) {
+			t = math.Max(1, (widths[i]+widths[i+1])/2*v.Zoom/2)
+		}
+		dashPhase = drawLine(s, p1, p2, c, a, t, dashed, dashPhase)
 	}
 }
 
@@ -114,8 +200,15 @@ func stamp(s Surface, p geom.Vec, c scene.Color, a, r float64) {
 	}
 }
 
-// fillPolygon scanline-fills a polygon (even-odd rule) in pixel space.
+// fillPolygon scanline-fills a polygon with a solid color.
 func fillPolygon(s Surface, pts []geom.Vec, c scene.Color, a float64) {
+	fillPolygonFunc(s, pts, func(int, int) scene.Color { return c }, a)
+}
+
+// fillPolygonFunc scanline-fills a polygon (even-odd rule) in pixel space,
+// asking colorAt for each pixel's color (constant for solid, varying for
+// gradients).
+func fillPolygonFunc(s Surface, pts []geom.Vec, colorAt func(x, y int) scene.Color, a float64) {
 	if len(pts) < 3 {
 		return
 	}
@@ -140,7 +233,7 @@ func fillPolygon(s Surface, pts []geom.Vec, c scene.Color, a float64) {
 		sort.Float64s(xs)
 		for i := 0; i+1 < len(xs); i += 2 {
 			for x := int(math.Round(xs[i])); x <= int(math.Round(xs[i+1])); x++ {
-				s.Set(x, y, c, a)
+				s.Set(x, y, colorAt(x, y), a)
 			}
 		}
 	}

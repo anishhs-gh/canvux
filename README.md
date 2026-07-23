@@ -10,7 +10,10 @@
 
 - **Infinite canvas** — pan and zoom (0.05x–400x) over unbounded world coordinates
 - **Full mouse support** — draw, drag-move, marquee-select, corner-handle resize, wheel zoom at cursor, clickable toolbar
-- **10 tools** — select, pan, brush, line, rect, ellipse, arrow, polygon, text, eraser
+- **11 tools** — select, pan, brush, line, rect, ellipse, arrow, polygon, bézier curve, text, eraser
+- **Advanced styling** — linear gradients, drop shadows, blur, dashed strokes, opacity, rotation, and a speed-sensitive variable-width brush
+- **Bézier curves** — drag to place, then bend them by dragging their round control handles
+- **Diagram library** — `i` inserts flowchart, UML, ER, architecture, sticky-note, table, and mind-map stencils
 - **Two render modes** — colorful half-block cells, or hi-res braille (2×4 dots per cell), toggle with `M`
 - **Real editor features** — undo/redo (200 levels), copy/paste, duplicate, rotate, z-order, snap-to-grid, shift-constrained drawing, multi-select, layers with lock/hide
 - **Command palette** — `:` fuzzy-searches every command
@@ -47,6 +50,10 @@ canvux info drawing.canvux   # stats
 | `v` | select — drag to move, corner handles resize, `del` deletes |
 | `t`, click, type | place text (double-click text to edit) |
 | `p`, click points, `enter` | polygon |
+| `n` then drag | bézier curve — reselect and drag its round handles to bend |
+| `i` | insert a diagram stencil (search "class", "cloud", "sticky"…) |
+| `S` / `B` | drop shadow / blur on selection |
+| `C`, pick color, `g` | gradient fill (second color) |
 | wheel / right-drag | zoom at cursor / pan |
 | `u` / `U` | undo / redo |
 | `:` | command palette · `?` full help · `L` layers |
@@ -82,7 +89,7 @@ make bench       # 10k-object frame benchmark
 
 ## Roadmap status
 
-Phases 0–8 of [the roadmap](canvux-roadmap.md) are implemented (foundation, camera, rendering, scene graph, editing, drawing tools, project files, SVG, productivity), plus parts of 9 (dashed strokes, opacity, rotation) and 12 (CLI scripting). Next up: Bézier curves, gradients, diagram libraries, plugins.
+Phases 0–10 of the project roadmap are implemented: foundation, camera, rendering, scene graph, editing, drawing tools, project files, SVG round-trip, productivity, advanced drawing (bézier, gradients, shadow, blur, variable-width strokes), and the diagramming stencil library — plus CLI scripting from phase 12. Next up: plugins (11), collaboration (13).
 
 ## License
 

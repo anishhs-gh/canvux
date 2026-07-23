@@ -111,3 +111,81 @@ func TestImportStyleAttributeAndNamedColors(t *testing.T) {
 		t.Errorf("rgb() parsing failed: %+v", doc.Objects[1])
 	}
 }
+
+func TestExportPhase9Features(t *testing.T) {
+	d := scene.NewDoc()
+	f2 := scene.Color{R: 0xff, G: 0x00, B: 0xff}
+	grad := &scene.Object{
+		Kind: scene.KindRect, P1: geom.V(0, 0), P2: geom.V(10, 10),
+		Stroke: scene.Color{R: 255}, Fill: scene.Color{B: 255}, Fill2: &f2,
+		Filled: true, StrokeWidth: 1, Opacity: 1, Shadow: true, Blur: 1,
+	}
+	d.Add(grad)
+	bez := &scene.Object{
+		Kind: scene.KindBezier, P1: geom.V(0, 0), C1: geom.V(3, 8), C2: geom.V(7, 8), P2: geom.V(10, 0),
+		Stroke: scene.Color{G: 255}, StrokeWidth: 1, Opacity: 1,
+	}
+	d.Add(bez)
+	vw := &scene.Object{
+		Kind:   scene.KindPath,
+		Points: []geom.Vec{{X: 0, Y: 0}, {X: 2, Y: 1}, {X: 4, Y: 0}},
+		Widths: []float64{0.5, 1.5, 2.5},
+		Stroke: scene.Color{R: 128}, StrokeWidth: 1, Opacity: 1,
+	}
+	d.Add(vw)
+
+	out := string(Export(d))
+	for _, want := range []string{
+		"<linearGradient", `fill="url(#grad`, "<feDropShadow", "<feGaussianBlur",
+		`filter="url(#fx`, `d="M 0 0 C 3 8, 7 8, 10 0"`, `stroke-width="0.5"`, `stroke-width="1.5"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("export missing %q", want)
+		}
+	}
+	// Must still be valid XML.
+	dec := xml.NewDecoder(strings.NewReader(out))
+	for {
+		if _, err := dec.Token(); err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			t.Fatalf("invalid XML: %v", err)
+		}
+	}
+	// Bezier exports must re-import (flattened to a path).
+	imported, _, err := Import([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundPath := false
+	for _, o := range imported.Objects {
+		if o.Kind == scene.KindPath && len(o.Points) > 10 {
+			foundPath = true
+		}
+	}
+	if !foundPath {
+		t.Error("bezier path did not re-import as flattened path")
+	}
+}
+
+func TestFlattenPathD(t *testing.T) {
+	pts, closed := flattenPathD("M 0 0 L 10 0 L 10 10 Z")
+	if !closed || len(pts) != 3 {
+		t.Errorf("triangle: closed=%v len=%d", closed, len(pts))
+	}
+	pts, closed = flattenPathD("M0,0 c 10,0 10,10 20,10")
+	if closed || len(pts) < 10 {
+		t.Errorf("relative cubic: closed=%v len=%d", closed, len(pts))
+	}
+	if end := pts[len(pts)-1]; end.Dist(geom.V(20, 10)) > 0.01 {
+		t.Errorf("cubic endpoint = %v, want (20,10)", end)
+	}
+	pts, _ = flattenPathD("M 0 0 H 10 V 5 h -2 v -1")
+	if end := pts[len(pts)-1]; end.Dist(geom.V(8, 4)) > 0.01 {
+		t.Errorf("H/V endpoint = %v, want (8,4)", end)
+	}
+	if p, _ := flattenPathD("M 0 0 A 5 5 0 0 1 10 10"); p != nil {
+		t.Error("arcs should be rejected, not mangled")
+	}
+}

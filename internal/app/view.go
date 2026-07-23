@@ -91,6 +91,23 @@ func (m *Model) drawSelection(pb *render.PixelBuf, v render.View) {
 			}
 			render.DrawObject(pb, v, h)
 		}
+		// Bézier control points: guide lines + round handles.
+		if o := objs[0]; o.Kind == scene.KindBezier {
+			for _, g := range [][2]geom.Vec{{o.P1, o.C1}, {o.P2, o.C2}} {
+				guide := &scene.Object{
+					Kind: scene.KindLine, P1: g[0], P2: g[1],
+					Stroke: m.theme.BarDim, StrokeWidth: m.hairline(), Opacity: 0.8, Dashed: true,
+				}
+				render.DrawObject(pb, v, guide)
+				knob := &scene.Object{
+					Kind: scene.KindEllipse,
+					P1:   g[1].Sub(geom.V(hs, hs)), P2: g[1].Add(geom.V(hs, hs)),
+					Stroke: m.theme.Accent, Fill: m.theme.Accent, Filled: true,
+					StrokeWidth: m.hairline(), Opacity: 1,
+				}
+				render.DrawObject(pb, v, knob)
+			}
+		}
 	}
 }
 
@@ -147,8 +164,8 @@ type toolButton struct {
 var toolButtons = []toolButton{
 	{"Sel", "v", ToolSelect}, {"Pan", "␣", ToolPan}, {"Brush", "b", ToolBrush},
 	{"Line", "l", ToolLine}, {"Rect", "r", ToolRect}, {"Ellip", "e", ToolEllipse},
-	{"Arrow", "a", ToolArrow}, {"Poly", "p", ToolPolygon}, {"Text", "t", ToolText},
-	{"Erase", "x", ToolEraser},
+	{"Arrow", "a", ToolArrow}, {"Poly", "p", ToolPolygon}, {"Curve", "n", ToolBezier},
+	{"Text", "t", ToolText}, {"Erase", "x", ToolEraser},
 }
 
 func (m *Model) drawToolbar(g *render.CellGrid) {
@@ -301,7 +318,12 @@ func (m *Model) toolHint() string {
 		}
 		return "click to place vertices · enter closes"
 	case ToolBrush:
+		if m.varBrush {
+			return "drag to draw · stroke speed varies the width"
+		}
 		return "drag to draw freehand"
+	case ToolBezier:
+		return "drag to place a curve · then drag its round handles with select"
 	case ToolText:
 		return "click to place text"
 	case ToolEraser:

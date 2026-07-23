@@ -16,6 +16,40 @@ func (m *Model) drawOverlay(g *render.CellGrid) {
 		m.drawColorPicker(g)
 	case ovLayers:
 		m.drawLayers(g)
+	case ovStencils:
+		m.drawStencils(g)
+	}
+}
+
+func (m *Model) drawStencils(g *render.CellGrid) {
+	t := m.theme
+	items := m.filteredStencils()
+	maxRows := minInt(14, m.h-8)
+	w := minInt(48, m.w-4)
+	h := maxRows + 4
+	ix, iy := m.box(g, w, h, "Insert Stencil")
+	inner := w - 4
+
+	g.SetString(ix, iy, "› "+m.stencilQry, t.OverlayFG, t.OverlayBG)
+	g.Set(ix+2+len([]rune(m.stencilQry)), iy, render.Cell{Ch: ' ', Fg: t.AccentText, Bg: t.Accent})
+	iy++
+
+	m.stencilSel = clampInt(m.stencilSel, 0, maxInt(0, len(items)-1))
+	top := clampInt(m.stencilSel-maxRows+1, 0, maxInt(0, len(items)-maxRows))
+	for i := 0; i < maxRows && top+i < len(items); i++ {
+		it := items[top+i]
+		fg, bg := t.OverlayFG, t.OverlayBG
+		if top+i == m.stencilSel {
+			fg, bg = t.OverlayFG, t.OverlaySel
+			for x := ix - 1; x < ix-1+inner+2; x++ {
+				g.Set(x, iy+1+i, render.Cell{Ch: ' ', Fg: fg, Bg: bg})
+			}
+		}
+		g.SetString(ix, iy+1+i, it.Name, fg, bg)
+		g.SetString(ix+inner-len([]rune(it.Cat)), iy+1+i, it.Cat, t.OverlayDim, bg)
+	}
+	if len(items) == 0 {
+		g.SetString(ix, iy+1, "no matching stencils", t.OverlayDim, t.OverlayBG)
 	}
 }
 
@@ -86,8 +120,9 @@ func (m *Model) drawPalette(g *render.CellGrid) {
 var helpLines = []string{
 	"TOOLS",
 	"  v select      b brush       l line        r rect",
-	"  e ellipse     a arrow       p polygon     t text",
-	"  x eraser      space pan (toggle)",
+	"  e ellipse     a arrow       p polygon     n curve",
+	"  t text        x eraser      space pan (toggle)",
+	"  i insert stencil (flowchart / UML / ER / arch / notes)",
 	"",
 	"CANVAS",
 	"  wheel zoom at cursor        shift+wheel pan sideways",
@@ -106,12 +141,15 @@ var helpLines = []string{
 	"",
 	"STYLE",
 	"  c stroke color      C fill color    1-9 quick stroke color",
-	"  f toggle fill       D toggle dashed",
+	"  f toggle fill       D toggle dashed S toggle shadow",
 	"  w/W stroke width +/-      O/o opacity +/-",
+	"  B / ctrl+b blur +/-",
+	"  gradient: C, pick color, press g (x clears)",
 	"",
 	"DRAWING",
 	"  shift while drawing: square / circle / 45° lines",
 	"  polygon: click vertices, enter or double-click to close",
+	"  curve: drag, then drag its round control handles (select tool)",
 	"  text: click, type, enter (double-click text to edit)",
 	"",
 	"FILES",

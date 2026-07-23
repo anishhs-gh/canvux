@@ -20,6 +20,7 @@ const (
 	KindPath    Kind = "path" // freehand brush stroke (open polyline)
 	KindArrow   Kind = "arrow"
 	KindText    Kind = "text"
+	KindBezier  Kind = "bezier" // cubic bézier: P1 -(C1,C2)-> P2
 )
 
 // Color is an RGB color serialized as "#rrggbb".
@@ -51,17 +52,26 @@ func (c *Color) UnmarshalText(b []byte) error {
 type Object struct {
 	ID     uint64     `json:"id"`
 	Kind   Kind       `json:"kind"`
-	P1     geom.Vec   `json:"p1,omitempty"`
-	P2     geom.Vec   `json:"p2,omitempty"`
+	P1     geom.Vec   `json:"p1,omitzero"`
+	P2     geom.Vec   `json:"p2,omitzero"`
+	C1     geom.Vec   `json:"c1,omitzero"` // bézier control point for P1
+	C2     geom.Vec   `json:"c2,omitzero"` // bézier control point for P2
 	Points []geom.Vec `json:"points,omitempty"`
-	Text   string     `json:"text,omitempty"`
+	// Widths holds optional per-point stroke widths for variable-width paths
+	// (same length as Points).
+	Widths []float64 `json:"widths,omitempty"`
+	Text   string    `json:"text,omitempty"`
 
 	Stroke      Color   `json:"stroke"`
 	Fill        Color   `json:"fill"`
+	Fill2       *Color  `json:"fill2,omitempty"`     // gradient end color (nil = solid)
+	GradAngle   float64 `json:"gradAngle,omitempty"` // gradient direction in degrees (0=→, 90=↓)
 	Filled      bool    `json:"filled,omitempty"`
 	StrokeWidth float64 `json:"strokeWidth"`
 	Opacity     float64 `json:"opacity"`
 	Dashed      bool    `json:"dashed,omitempty"`
+	Shadow      bool    `json:"shadow,omitempty"`
+	Blur        float64 `json:"blur,omitempty"`     // gaussian-ish blur radius in world units
 	Rotation    float64 `json:"rotation,omitempty"` // radians about the bounds center
 	Layer       int     `json:"layer"`
 }
@@ -72,7 +82,33 @@ func (o *Object) Clone() *Object {
 	if o.Points != nil {
 		c.Points = append([]geom.Vec(nil), o.Points...)
 	}
+	if o.Widths != nil {
+		c.Widths = append([]float64(nil), o.Widths...)
+	}
+	if o.Fill2 != nil {
+		f2 := *o.Fill2
+		c.Fill2 = &f2
+	}
 	return &c
+}
+
+// BezierPoints flattens the cubic bézier into n+1 points (world space,
+// before rotation).
+func (o *Object) BezierPoints(n int) []geom.Vec {
+	pts := make([]geom.Vec, n+1)
+	for i := 0; i <= n; i++ {
+		t := float64(i) / float64(n)
+		u := 1 - t
+		a := u * u * u
+		b := 3 * u * u * t
+		c := 3 * u * t * t
+		d := t * t * t
+		pts[i] = geom.V(
+			a*o.P1.X+b*o.C1.X+c*o.C2.X+d*o.P2.X,
+			a*o.P1.Y+b*o.C1.Y+c*o.C2.Y+d*o.P2.Y,
+		)
+	}
+	return pts
 }
 
 // baseBounds is the unrotated bounding box.
@@ -80,6 +116,8 @@ func (o *Object) baseBounds() geom.Rect {
 	switch o.Kind {
 	case KindPolygon, KindPath:
 		return geom.BoundsOf(o.Points)
+	case KindBezier:
+		return geom.BoundsOf(o.BezierPoints(24))
 	case KindText:
 		// One cell per rune; text renders at fixed terminal size but we give it
 		// a nominal world footprint so it can be selected and framed.
@@ -130,6 +168,8 @@ func (o *Object) Outline() [][]geom.Vec {
 		}
 	case KindPath:
 		lines = [][]geom.Vec{append([]geom.Vec(nil), o.Points...)}
+	case KindBezier:
+		lines = [][]geom.Vec{o.BezierPoints(24)}
 	case KindText:
 		c := o.baseBounds().Corners()
 		lines = [][]geom.Vec{{c[0], c[1], c[2], c[3], c[0]}}
@@ -198,6 +238,8 @@ func (o *Object) Hit(p geom.Vec, tol float64) bool {
 func (o *Object) Translate(d geom.Vec) {
 	o.P1 = o.P1.Add(d)
 	o.P2 = o.P2.Add(d)
+	o.C1 = o.C1.Add(d)
+	o.C2 = o.C2.Add(d)
 	for i := range o.Points {
 		o.Points[i] = o.Points[i].Add(d)
 	}
@@ -210,6 +252,8 @@ func (o *Object) ScaleAround(pivot geom.Vec, sx, sy float64) {
 	}
 	o.P1 = scale(o.P1)
 	o.P2 = scale(o.P2)
+	o.C1 = scale(o.C1)
+	o.C2 = scale(o.C2)
 	for i := range o.Points {
 		o.Points[i] = scale(o.Points[i])
 	}

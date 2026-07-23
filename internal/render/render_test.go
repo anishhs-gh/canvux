@@ -118,3 +118,90 @@ func BenchmarkFrame10k(b *testing.B) {
 		_ = g.ANSI()
 	}
 }
+
+func TestGradientFillVaries(t *testing.T) {
+	pb := NewPixelBuf(40, 40)
+	f2 := scene.Color{R: 255}
+	o := &scene.Object{
+		Kind: scene.KindRect, P1: geom.V(-9, -9), P2: geom.V(9, 9),
+		Stroke: scene.Color{}, Fill: scene.Color{B: 255}, Fill2: &f2,
+		Filled: true, StrokeWidth: 1, Opacity: 1, GradAngle: 90,
+	}
+	DrawObject(pb, testView(40, 40), o)
+	top, _ := pb.resolve(20, 5, scene.Color{})
+	bot, _ := pb.resolve(20, 35, scene.Color{})
+	if top.B < bot.B || bot.R < top.R {
+		t.Errorf("vertical gradient not blue->red: top=%+v bot=%+v", top, bot)
+	}
+	if top == bot {
+		t.Error("gradient fill produced a flat color")
+	}
+}
+
+func TestShadowDrawsOffsetPixels(t *testing.T) {
+	pb := NewPixelBuf(60, 60)
+	o := &scene.Object{
+		Kind: scene.KindRect, P1: geom.V(-5, -5), P2: geom.V(5, 5),
+		Stroke: scene.Color{R: 255}, Fill: scene.Color{R: 255}, Filled: true,
+		StrokeWidth: 1, Opacity: 1, Shadow: true,
+	}
+	DrawObject(pb, testView(60, 60), o)
+	// Beyond the bottom-right corner (shape edge at px 40): shadow territory.
+	if _, a := pb.resolve(42, 42, scene.Color{}); a == 0 {
+		t.Error("no shadow pixels below-right of the shape")
+	}
+	if _, a := pb.resolve(14, 14, scene.Color{}); a != 0 {
+		t.Error("shadow must not appear above-left of the shape")
+	}
+}
+
+func TestBlurSpreadsPixels(t *testing.T) {
+	sharp := NewPixelBuf(60, 60)
+	blurred := NewPixelBuf(60, 60)
+	base := &scene.Object{
+		Kind: scene.KindRect, P1: geom.V(-5, -5), P2: geom.V(5, 5),
+		Stroke: scene.Color{G: 255}, StrokeWidth: 1, Opacity: 1,
+	}
+	DrawObject(sharp, testView(60, 60), base)
+	b := base.Clone()
+	b.Blur = 2
+	DrawObject(blurred, testView(60, 60), b)
+	count := func(p *PixelBuf) int {
+		n := 0
+		for y := 0; y < 60; y++ {
+			for x := 0; x < 60; x++ {
+				if _, a := p.resolve(x, y, scene.Color{}); a > 0.05 {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	if count(blurred) <= count(sharp) {
+		t.Error("blur should cover more pixels than the sharp original")
+	}
+}
+
+func TestVariableWidthStroke(t *testing.T) {
+	pb := NewPixelBuf(80, 40)
+	o := &scene.Object{
+		Kind:   scene.KindPath,
+		Points: []geom.Vec{{X: -15, Y: 0}, {X: 0, Y: 0}, {X: 15, Y: 0}},
+		Widths: []float64{0.5, 0.5, 6},
+		Stroke: scene.Color{R: 255}, StrokeWidth: 1, Opacity: 1,
+	}
+	DrawObject(pb, testView(80, 40), o)
+	// Thick end should paint far more vertical extent than the thin end.
+	colCount := func(x int) int {
+		n := 0
+		for y := 0; y < 40; y++ {
+			if _, a := pb.resolve(x, y, scene.Color{}); a > 0 {
+				n++
+			}
+		}
+		return n
+	}
+	if thin, thick := colCount(14), colCount(66); thick <= thin+2 {
+		t.Errorf("variable width flat: thin col=%d thick col=%d", thin, thick)
+	}
+}
