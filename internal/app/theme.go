@@ -44,6 +44,27 @@ var DefaultTheme = Theme{
 	OK:         scene.Color{R: 0x9e, G: 0xce, B: 0x6a},
 }
 
+// LightTheme is whiteboard mode: paper-light canvas, soft chrome.
+var LightTheme = Theme{
+	CanvasBG:   scene.Color{R: 0xf4, G: 0xf4, B: 0xef},
+	GridDot:    scene.Color{R: 0xd8, G: 0xd8, B: 0xd0},
+	Axis:       scene.Color{R: 0xc0, G: 0xc0, B: 0xb8},
+	BarBG:      scene.Color{R: 0xe4, G: 0xe4, B: 0xdd},
+	BarFG:      scene.Color{R: 0x2a, G: 0x2e, B: 0x3a},
+	BarDim:     scene.Color{R: 0x8a, G: 0x8f, B: 0x9d},
+	Accent:     scene.Color{R: 0x2e, G: 0x5c, B: 0xd6},
+	AccentText: scene.Color{R: 0xff, G: 0xff, B: 0xff},
+	Selection:  scene.Color{R: 0x2e, G: 0x5c, B: 0xd6},
+	Handle:     scene.Color{R: 0xb0, G: 0x72, B: 0x10},
+	Marquee:    scene.Color{R: 0x4a, G: 0x74, B: 0xdd},
+	OverlayBG:  scene.Color{R: 0xea, G: 0xea, B: 0xe3},
+	OverlayFG:  scene.Color{R: 0x2a, G: 0x2e, B: 0x3a},
+	OverlayDim: scene.Color{R: 0x7a, G: 0x7f, B: 0x8d},
+	OverlaySel: scene.Color{R: 0xd4, G: 0xd9, B: 0xe8},
+	Danger:     scene.Color{R: 0xc4, G: 0x33, B: 0x4d},
+	OK:         scene.Color{R: 0x3d, G: 0x84, B: 0x2f},
+}
+
 // Palette is the drawing color swatch set (Tokyo Night-ish, readable on dark).
 var Palette = []scene.Color{
 	{R: 0xc0, G: 0xca, B: 0xf5}, // foreground

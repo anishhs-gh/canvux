@@ -16,6 +16,9 @@ func (m *Model) View() string {
 	if m.w < 20 || m.h < 6 {
 		return "Terminal too small for Canvux — resize to at least 20x6."
 	}
+	if m.present {
+		return m.viewPresent()
+	}
 	t := m.theme
 	g := render.NewCellGrid(m.w, m.h, t.CanvasBG)
 	v := m.view()
@@ -36,10 +39,29 @@ func (m *Model) View() string {
 
 	g.Composite(pb, m.mode, 1, t.CanvasBG)
 	m.drawTexts(g, v)
+	m.drawPeers(g, v)
 	m.drawToolbar(g)
 	m.drawStatus(g)
 	m.drawOverlay(g)
 	return g.ANSI()
+}
+
+// drawPeers renders remote collaborators' live cursors.
+func (m *Model) drawPeers(g *render.CellGrid, v render.View) {
+	if len(m.peers) == 0 {
+		return
+	}
+	sx, sy := m.mode.PixelScale()
+	for _, p := range m.peers {
+		px := v.ToPixel(p.pos)
+		cx, cy := int(px.X)/sx, int(px.Y)/sy+1
+		under := g.Get(cx, cy)
+		g.Set(cx, cy, render.Cell{Ch: '✛', Fg: p.color, Bg: under.Bg})
+		for i, r := range p.name {
+			u := g.Get(cx+2+i, cy)
+			g.Set(cx+2+i, cy, render.Cell{Ch: r, Fg: p.color, Bg: u.Bg})
+		}
+	}
 }
 
 // hairline returns a world-space stroke width that rasterizes to ~1px.
@@ -273,8 +295,12 @@ func (m *Model) drawStatus(g *render.CellGrid) {
 		flags += "snap "
 	}
 	layer := m.doc.Layers[m.currentLayer()].Name
-	right := fmt.Sprintf("%s· %s · %s · %d obj · %.0f%% · (%.1f, %.1f) ",
-		flags, m.mode, layer, len(m.doc.Objects), m.doc.Camera.Zoom*50, m.mouseWorld.X, m.mouseWorld.Y)
+	peers := ""
+	if m.collab != nil {
+		peers = fmt.Sprintf("◉ %d peers · ", len(m.peers))
+	}
+	right := fmt.Sprintf("%s%s· %s · %s · %d obj · %.0f%% · (%.1f, %.1f) ",
+		peers, flags, m.mode, layer, len(m.doc.Objects), m.doc.Camera.Zoom*50, m.mouseWorld.X, m.mouseWorld.Y)
 	rx := m.w - len([]rune(right))
 	if rx > lx {
 		g.SetString(rx, y, right, t.BarDim, t.BarBG)

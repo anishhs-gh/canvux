@@ -9,8 +9,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/anishhs-gh/canvux/internal/collab"
 	"github.com/anishhs-gh/canvux/internal/geom"
 	"github.com/anishhs-gh/canvux/internal/history"
+	"github.com/anishhs-gh/canvux/internal/plugin"
 	"github.com/anishhs-gh/canvux/internal/render"
 	"github.com/anishhs-gh/canvux/internal/scene"
 )
@@ -147,6 +149,16 @@ type Model struct {
 	mouseWorld geom.Vec
 
 	toolbarHits []hitRegion // rebuilt every frame
+
+	plugins []plugin.Manifest
+
+	collab       *collab.Client
+	peers        map[int]peerState
+	collabShadow map[uint64]string
+
+	// Presentation mode: layers become slides.
+	present    bool
+	presentIdx int
 }
 
 type hitRegion struct {
@@ -177,6 +189,7 @@ func New(path string) (*Model, error) {
 		}
 		m.path = path
 	}
+	m.plugins = plugin.Discover()
 	return m, nil
 }
 
@@ -186,7 +199,12 @@ func autosaveCmd() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg { return autosaveTick(t) })
 }
 
-func (m *Model) Init() tea.Cmd { return autosaveCmd() }
+func (m *Model) Init() tea.Cmd {
+	if m.collab != nil {
+		return tea.Batch(autosaveCmd(), collabTickCmd())
+	}
+	return autosaveCmd()
+}
 
 // canvasRows is the number of terminal rows dedicated to the canvas.
 func (m *Model) canvasRows() int { return maxInt(1, m.h-2) }
@@ -296,12 +314,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, autosaveCmd()
+	case collabTick:
+		if m.collab == nil {
+			return m, nil
+		}
+		m.syncCollab()
+		return m, collabTickCmd()
+	case pluginResult:
+		m.handlePluginResult(msg)
+		return m, nil
 	case tea.MouseMsg:
+		if m.present {
+			return m, m.presentMouse(msg)
+		}
 		return m, m.handleMouse(msg)
 	case tea.KeyMsg:
 		// Stale status messages clear on the next keypress.
 		if m.statusMsg != "" && time.Since(m.statusAt) > 4*time.Second {
 			m.statusMsg = ""
+		}
+		if m.present {
+			return m, m.presentKey(msg.String())
 		}
 		if m.prompt != nil {
 			return m, m.handlePromptKey(msg)

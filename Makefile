@@ -1,7 +1,7 @@
-VERSION ?= 0.2.0
+VERSION ?= 1.0.0
 LDFLAGS  = -s -w -X main.version=$(VERSION)
 
-.PHONY: build test bench demo clean
+.PHONY: build test bench demo plugins clean
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o canvux ./cmd/canvux

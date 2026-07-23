@@ -12,6 +12,7 @@ import (
 	"github.com/anishhs-gh/canvux/internal/export"
 	"github.com/anishhs-gh/canvux/internal/geom"
 	"github.com/anishhs-gh/canvux/internal/history"
+	"github.com/anishhs-gh/canvux/internal/imgembed"
 	"github.com/anishhs-gh/canvux/internal/render"
 	"github.com/anishhs-gh/canvux/internal/scene"
 	"github.com/anishhs-gh/canvux/internal/svg"
@@ -100,6 +101,18 @@ func commands() []Command {
 		}},
 		{"Toggle Render Mode (block/braille)", "M", (*Model).cmdToggleMode},
 		{"Layers…", "L", func(m *Model) tea.Cmd { m.overlay = ovLayers; return nil }},
+		{"Presentation Mode (layers = slides)", "P", (*Model).enterPresent},
+		{"Toggle Whiteboard (light) Theme", "", func(m *Model) tea.Cmd {
+			if m.theme.CanvasBG == DefaultTheme.CanvasBG {
+				m.theme = LightTheme
+				m.setStatus(statusInfo, "whiteboard theme")
+			} else {
+				m.theme = DefaultTheme
+				m.setStatus(statusInfo, "dark theme")
+			}
+			return nil
+		}},
+		{"Import Image (pixel grid)…", "", (*Model).cmdImportImage},
 		{"Help", "?", func(m *Model) tea.Cmd { m.overlay = ovHelp; m.helpTop = 0; return nil }},
 		{"Quit", "q", (*Model).cmdQuit},
 	}
@@ -525,5 +538,42 @@ func (m *Model) cmdToggleMode() tea.Cmd {
 }
 
 func (m *Model) cmdQuit() tea.Cmd {
-	return m.confirmIfDirty("Quit without saving?", func(m *Model) tea.Cmd { return tea.Quit })
+	quit := func(m *Model) tea.Cmd {
+		if m.collab != nil {
+			m.collab.Close()
+		}
+		return tea.Quit
+	}
+	if m.collab != nil {
+		// Collab docs live on the server; no unsaved-changes prompt.
+		return quit(m)
+	}
+	return m.confirmIfDirty("Quit without saving?", quit)
+}
+
+func (m *Model) cmdImportImage() tea.Cmd {
+	m.prompt = &promptState{
+		label: "Image file (png/jpg/gif)", value: "",
+		confirm: func(m *Model, v string) tea.Cmd {
+			if v == "" {
+				return nil
+			}
+			objs, err := imgembed.FromFile(v, 48, m.currentLayer())
+			if err != nil {
+				m.setStatus(statusErr, "image import failed: %v", err)
+				return nil
+			}
+			m.checkpoint("import image")
+			m.clearSelection()
+			off := m.doc.Camera.Center
+			for _, o := range objs {
+				o.Translate(off)
+				m.doc.Add(o)
+				m.sel[o.ID] = true
+			}
+			m.setStatus(statusOK, "imported image as %d rects — drag to place", len(objs))
+			return nil
+		},
+	}
+	return nil
 }

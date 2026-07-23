@@ -163,6 +163,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.overlay = ovStencils
 		m.stencilQry = ""
 		m.stencilSel = 0
+	case "P":
+		return m.enterPresent()
 	case "?":
 		m.overlay = ovHelp
 		m.helpTop = 0
@@ -402,9 +404,9 @@ func (m *Model) paletteKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// filteredCommands fuzzy-filters the registry by subsequence match.
+// filteredCommands fuzzy-filters the registry (plus plugin commands).
 func (m *Model) filteredCommands() []Command {
-	all := commands()
+	all := append(commands(), m.pluginCommands()...)
 	if m.palQuery == "" {
 		return all
 	}

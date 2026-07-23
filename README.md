@@ -14,14 +14,18 @@
 - **Advanced styling** — linear gradients, drop shadows, blur, dashed strokes, opacity, rotation, and a speed-sensitive variable-width brush
 - **Bézier curves** — drag to place, then bend them by dragging their round control handles
 - **Diagram library** — `i` inserts flowchart, UML, ER, architecture, sticky-note, table, and mind-map stencils
+- **Realtime collaboration** — `canvux serve` hosts a document; others `canvux join` and edit together with live peer cursors
+- **Plugins** — any executable named `canvux-*` extends the editor via JSON over stdin/stdout; write generators, importers, exporters, and transforms in any language
+- **Presentation mode** — `P` turns layers into slides; plus a light "whiteboard" theme
+- **Image embedding** — import a PNG/JPEG/GIF as a run-merged grid of vector rects
 - **Two render modes** — colorful half-block cells, or hi-res braille (2×4 dots per cell), toggle with `M`
 - **Real editor features** — undo/redo (200 levels), copy/paste, duplicate, rotate, z-order, snap-to-grid, shift-constrained drawing, multi-select, layers with lock/hide
-- **Command palette** — `:` fuzzy-searches every command
-- **Git-friendly files** — `.canvux` is indented JSON with a versioned schema; autosaves every 30 s
-- **SVG round-trip** — export clean SVG, import basic SVG shapes back
+- **Command palette** — `:` fuzzy-searches every command (including plugin commands)
+- **Git-friendly files** — `.canvux` is indented JSON with a versioned schema; autosaves every 30 s; `canvux diff` gives object-level diffs
+- **SVG round-trip** — export clean SVG (gradients, filters, bézier paths), import SVG shapes and paths back
 - **PNG export** — rasterized at any scale from the same renderer
-- **Scriptable CLI** — `render`, `export`, `info` subcommands for pipelines
-- **Fast** — a frame with 10 000 objects rasterizes in ~5 ms; single ~4 MB binary, no runtime deps
+- **Scriptable CLI** — `render`, `export`, `add`, `diff`, `serve`, `join`, `plugins`, `info` for pipelines
+- **Fast** — a frame with 10 000 objects rasterizes in ~5 ms; single ~4.5 MB binary, no runtime deps
 
 ## Install
 
@@ -38,7 +42,13 @@ canvux                       # blank canvas
 canvux drawing.canvux        # open (or create on save) a project
 canvux render examples/demo.canvux          # print a drawing to stdout
 canvux export drawing.canvux --svg out.svg --png out.png --scale 10
+canvux add rect drawing.canvux --at 0,0 --size 20,10 --fill '#334'
+canvux diff old.canvux new.canvux           # object-level diff (exit 1 if differ)
 canvux info drawing.canvux   # stats
+
+# collaborate
+canvux serve team.canvux                    # host on :7878
+canvux join 192.168.1.5:7878 --name alice   # join from another machine
 ```
 
 ### The 90-second tour
@@ -54,6 +64,7 @@ canvux info drawing.canvux   # stats
 | `i` | insert a diagram stencil (search "class", "cloud", "sticky"…) |
 | `S` / `B` | drop shadow / blur on selection |
 | `C`, pick color, `g` | gradient fill (second color) |
+| `P` | presentation mode (layers become slides) |
 | wheel / right-drag | zoom at cursor / pan |
 | `u` / `U` | undo / redo |
 | `:` | command palette · `?` full help · `L` layers |
@@ -68,17 +79,23 @@ Everything else is in the in-app help (`?`).
 ## Architecture
 
 ```
-cmd/canvux        CLI: editor, render, export, info
-internal/app      bubbletea model: tools, input, overlays, toolbar/status UI
+cmd/canvux        CLI: editor, render, export, add, diff, serve, join, plugins, info
+internal/app      bubbletea model: tools, input, overlays, toolbar/status UI,
+                  presentation mode, plugin + collaboration integration
 internal/scene    scene graph: objects, layers, hit-testing, (de)serialization
 internal/render   rasterizer (Surface interface) + cell compositors (half-block/braille) + ANSI
-internal/svg      SVG export + import
+internal/svg      SVG export + import (gradients, filters, path flattening)
 internal/export   PNG export (image-backed Surface, micro bitmap font)
+internal/imgembed image → run-merged vector rects
+internal/plugin   external-process plugin protocol (JSON over stdio)
+internal/collab   realtime collaboration server + client (TCP, JSON lines)
 internal/history  snapshot undo/redo
 internal/geom     vectors, rects, transforms
 ```
 
-The rasterizer draws into an abstract `Surface`, so the terminal buffer and the PNG exporter share the same drawing code.
+The rasterizer draws into an abstract `Surface`, so the terminal buffer and the PNG exporter share the same drawing code. Plugins and collaboration are separable packages the editor drives through small integration files.
+
+See [`examples/plugins/`](examples/plugins/) for the plugin protocol and a working example.
 
 ## Development
 
@@ -89,7 +106,9 @@ make bench       # 10k-object frame benchmark
 
 ## Roadmap status
 
-Phases 0–10 of the project roadmap are implemented: foundation, camera, rendering, scene graph, editing, drawing tools, project files, SVG round-trip, productivity, advanced drawing (bézier, gradients, shadow, blur, variable-width strokes), and the diagramming stencil library — plus CLI scripting from phase 12. Next up: plugins (11), collaboration (13).
+**All roadmap phases (0–14) are implemented.** Foundation, camera, rendering, scene graph, editing, drawing tools, project files, SVG round-trip, productivity, advanced drawing (bézier, gradients, shadow, blur, variable-width strokes), the diagramming stencil library, the plugin API, CLI scripting (`add`/`render`/`export`/`diff`), realtime collaboration with live cursors, and ecosystem features — presentation mode, whiteboard theme, git-diff viewer, and image embedding.
+
+Ecosystem items that need external spec tables or services (QR/barcode encoders, Mermaid/LaTeX rendering, AI object generation) are intentionally left to the plugin API rather than bundled — a plugin can add any of them without touching the core.
 
 ## License
 

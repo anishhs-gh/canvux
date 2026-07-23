@@ -111,6 +111,27 @@ func (d *Doc) zIndex(id uint64) int {
 	return -1
 }
 
+// Upsert replaces the object with the same ID in place, or appends it.
+// Used by collaboration, where IDs arrive pre-assigned.
+func (d *Doc) Upsert(o *Object) {
+	if i := d.zIndex(o.ID); i >= 0 {
+		d.Objects[i] = o
+		return
+	}
+	d.Objects = append(d.Objects, o)
+	if o.ID >= d.nextID {
+		d.nextID = o.ID + 1
+	}
+}
+
+// SetIDBase raises the ID counter so future Adds allocate at or above base
+// (collaboration namespaces IDs per client).
+func (d *Doc) SetIDBase(base uint64) {
+	if d.nextID < base {
+		d.nextID = base
+	}
+}
+
 // Raise moves the object one step up in z-order; Lower the opposite.
 func (d *Doc) Raise(id uint64) {
 	if i := d.zIndex(id); i >= 0 && i < len(d.Objects)-1 {

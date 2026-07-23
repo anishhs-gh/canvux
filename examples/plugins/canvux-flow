@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""canvux-flow: an example Canvux plugin — turns a tiny arrow DSL into a
+flowchart. Demonstrates the object-generator side of the plugin protocol.
+
+Usage inside Canvux: command palette -> "Plugin: flow — generate", then type
+something like:
+
+    start -> parse -> check; check -> ok; check -> retry; retry -> parse
+
+Install: copy (or symlink) this file into ~/.config/canvux/plugins/ and
+`chmod +x` it.
+"""
+import json
+import sys
+
+MANIFEST = {
+    "name": "flow",
+    "version": "1.0.0",
+    "description": "generate flowcharts from 'a -> b; b -> c' text",
+    "commands": [
+        {
+            "name": "generate",
+            "description": "text DSL to flowchart",
+            "prompt": "Flow (e.g. a -> b -> c; b -> d)",
+        }
+    ],
+}
+
+BOX_W, BOX_H, GAP_X, GAP_Y = 22, 8, 14, 6
+COLORS = ["#7aa2f7", "#9ece6a", "#e0af68", "#bb9af7", "#7dcfff", "#f7768e"]
+FILLS = ["#1a2340", "#1c2a1a", "#3a2f14", "#241a33", "#132a33", "#33141a"]
+
+
+def parse(dsl):
+    """Return (ordered nodes, edges) from 'a -> b -> c; b -> d'."""
+    nodes, edges = [], []
+    for clause in dsl.replace("\n", ";").split(";"):
+        parts = [p.strip() for p in clause.split("->")]
+        parts = [p for p in parts if p]
+        for p in parts:
+            if p not in nodes:
+                nodes.append(p)
+        for a, b in zip(parts, parts[1:]):
+            if (a, b) not in edges:
+                edges.append((a, b))
+    return nodes, edges
+
+
+def layout(nodes, edges):
+    """Assign (col, row): col = longest path depth, row = order within col."""
+    depth = {n: 0 for n in nodes}
+    for _ in range(len(nodes)):  # relax edges; cycles just stop improving
+        for a, b in edges:
+            if depth[b] < depth[a] + 1 and depth[a] + 1 < len(nodes):
+                depth[b] = depth[a] + 1
+    cols = {}
+    pos = {}
+    for n in nodes:
+        row = cols.get(depth[n], 0)
+        cols[depth[n]] = row + 1
+        pos[n] = (depth[n], row)
+    return pos
+
+
+def generate(dsl):
+    nodes, edges = parse(dsl)
+    if not nodes:
+        return {"error": "no nodes found — try: a -> b -> c"}
+    pos = layout(nodes, edges)
+    objs = []
+    centers = {}
+    for i, n in enumerate(nodes):
+        col, row = pos[n]
+        x = col * (BOX_W + GAP_X)
+        y = row * (BOX_H + GAP_Y)
+        centers[n] = (x + BOX_W / 2, y + BOX_H / 2)
+        objs.append({
+            "kind": "rect",
+            "p1": {"x": x, "y": y},
+            "p2": {"x": x + BOX_W, "y": y + BOX_H},
+            "stroke": COLORS[i % len(COLORS)],
+            "fill": FILLS[i % len(FILLS)],
+            "filled": True,
+            "strokeWidth": 1,
+            "opacity": 1,
+        })
+        label = n[: BOX_W - 4]
+        objs.append({
+            "kind": "text",
+            "p1": {"x": x + (BOX_W - len(label)) / 2, "y": y + BOX_H / 2 - 1},
+            "text": label,
+            "stroke": "#c0caf5",
+            "strokeWidth": 1,
+            "opacity": 1,
+        })
+    for a, b in edges:
+        ax, ay = centers[a]
+        bx, by = centers[b]
+        objs.append({
+            "kind": "arrow",
+            "p1": {"x": ax + BOX_W / 2, "y": ay},
+            "p2": {"x": bx - BOX_W / 2, "y": by},
+            "stroke": "#7dcfff",
+            "strokeWidth": 1,
+            "opacity": 1,
+        })
+    return {"objects": objs, "message": f"{len(nodes)} nodes, {len(edges)} edges"}
+
+
+def main():
+    if "--canvux-manifest" in sys.argv:
+        print(json.dumps(MANIFEST))
+        return
+    req = json.load(sys.stdin)
+    if req.get("command") == "generate":
+        print(json.dumps(generate(req.get("args", ""))))
+    else:
+        print(json.dumps({"error": f"unknown command {req.get('command')}"}))
+
+
+if __name__ == "__main__":
+    main()

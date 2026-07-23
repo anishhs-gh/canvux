@@ -34,8 +34,27 @@ func main() {
 		case "render":
 			exitOn(runRender(args[1:]))
 			return
+		case "add":
+			exitOn(runAdd(args[1:]))
+			return
 		case "info":
 			exitOn(runInfo(args[1:]))
+			return
+		case "diff":
+			differs, err := runDiff(args[1:])
+			exitOn(err)
+			if differs {
+				os.Exit(1)
+			}
+			return
+		case "serve":
+			exitOn(runServe(args[1:]))
+			return
+		case "join":
+			exitOn(runJoin(args[1:]))
+			return
+		case "plugins":
+			exitOn(runPlugins())
 			return
 		case "version", "--version", "-v":
 			fmt.Printf("canvux %s\n", version)
@@ -189,7 +208,13 @@ usage:
   canvux render <file>     print one frame to stdout (like cat for drawings)
       --cols N --rows N    output size (default 100x30)
       --braille            hi-res braille rendering
+  canvux add <kind> <file> scripted insertion: rect|ellipse|line|arrow|text|
+                           polygon|image (see canvux add --help)
   canvux info <file>       print document statistics
+  canvux diff <a> <b>      object-level diff; exit 1 when files differ
+  canvux serve <file>      host a realtime collaboration session
+  canvux join <host:port>  open the editor connected to a session
+  canvux plugins           list discovered canvux-* plugins
   canvux version
 
 editor quick keys: ? help · : command palette · ctrl+s save · q quit

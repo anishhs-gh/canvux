@@ -159,6 +159,16 @@ var helpLines = []string{
 	"UI",
 	"  : or ctrl+p command palette    L layers    ? this help",
 	"  u/ctrl+z undo   U/ctrl+y redo  q quit",
+	"  P presentation mode (layers = slides, ←/→, esc)",
+	"",
+	"COLLABORATION",
+	"  host:  canvux serve file.canvux    (then share host:7878)",
+	"  join:  canvux join host:7878 --name you",
+	"  peers' cursors appear live; edits merge last-writer-wins",
+	"",
+	"PLUGINS",
+	"  executables named canvux-* in ~/.config/canvux/plugins",
+	"  appear in the command palette; see canvux plugins",
 }
 
 func (m *Model) drawHelp(g *render.CellGrid) {
