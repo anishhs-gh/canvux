@@ -5,6 +5,7 @@ package scene
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/anishhs-gh/canvux/internal/geom"
 )
@@ -22,6 +23,15 @@ const (
 	KindText    Kind = "text"
 	KindBezier  Kind = "bezier" // cubic bézier: P1 -(C1,C2)-> P2
 )
+
+// TextLines splits an object's text into visual lines (on '\n'), always
+// returning at least one (possibly empty) line.
+func TextLines(s string) []string {
+	if s == "" {
+		return []string{""}
+	}
+	return strings.Split(s, "\n")
+}
 
 // Color is an RGB color serialized as "#rrggbb".
 type Color struct{ R, G, B uint8 }
@@ -120,12 +130,20 @@ func (o *Object) baseBounds() geom.Rect {
 		return geom.BoundsOf(o.BezierPoints(24))
 	case KindText:
 		// One cell per rune; text renders at fixed terminal size but we give it
-		// a nominal world footprint so it can be selected and framed.
-		w := float64(len([]rune(o.Text)))
+		// a nominal world footprint (widest line × line count) so it can be
+		// selected and framed. Multi-line text splits on '\n'.
+		lines := TextLines(o.Text)
+		w := 0
+		for _, ln := range lines {
+			if n := len([]rune(ln)); n > w {
+				w = n
+			}
+		}
 		if w < 1 {
 			w = 1
 		}
-		return geom.Rect{Min: o.P1, Max: o.P1.Add(geom.V(w, 2))}
+		h := float64(len(lines)) * 2
+		return geom.Rect{Min: o.P1, Max: o.P1.Add(geom.V(float64(w), h))}
 	default:
 		return geom.R(o.P1, o.P2)
 	}

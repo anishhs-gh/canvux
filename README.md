@@ -13,6 +13,10 @@
 - **11 tools** — select, pan, brush, line, rect, ellipse, arrow, polygon, bézier curve, text, eraser
 - **Advanced styling** — linear gradients, drop shadows, blur, dashed strokes, opacity, rotation, and a speed-sensitive variable-width brush
 - **Bézier curves** — drag to place, then bend them by dragging their round control handles
+- **Smart alignment guides** — shapes snap to other objects' edges and centers as you draw or move them, with guide lines (hold shift to disable)
+- **Multi-line text** — a full caret (←→↑↓, Home/End), `ctrl+j` for newlines, editable in place
+- **Smooth freehand** — brush strokes are simplified and smoothed on release, so they're clean and compact
+- **Mouse-free drawing** — `K` toggles keyboard-draw: move a virtual cursor with the arrows, set points with Enter
 - **Diagram library** — `i` inserts flowchart, UML, ER, architecture, sticky-note, table, and mind-map stencils
 - **Realtime collaboration** — `canvux serve` hosts a document; others `canvux join` and edit together with live peer cursors
 - **Plugins** — any executable named `canvux-*` extends the editor via JSON over stdin/stdout; write generators, importers, exporters, and transforms in any language
@@ -104,7 +108,8 @@ Any key can be remapped to any action ID (the palette shows each command's curre
 ```
 cmd/canvux        CLI: editor, render, export, add, diff, serve, join, plugins, info
 internal/app      bubbletea model: tools, input, overlays, toolbar/status UI,
-                  actions/keymap, presentation, plugin + collaboration integration
+                  actions/keymap, alignment guides, keyboard-draw,
+                  presentation, plugin + collaboration integration
 internal/config   layered JSON config (global + project-local)
 internal/scene    scene graph: objects, layers, hit-testing, (de)serialization
 internal/render   rasterizer (Surface interface) + cell compositors (half-block/braille) + ANSI + color profiles

@@ -123,12 +123,13 @@ type Model struct {
 	shadow      bool
 	varBrush    bool // speed-sensitive variable-width brush
 
-	sel      map[uint64]bool
-	drag     dragState
-	draft    *scene.Object // shape being drawn
-	polyPts  []geom.Vec    // in-progress polygon vertices
-	textObj  *scene.Object // text being edited (not yet in doc)
-	editText *scene.Object // existing text object being re-edited
+	sel       map[uint64]bool
+	drag      dragState
+	draft     *scene.Object // shape being drawn
+	polyPts   []geom.Vec    // in-progress polygon vertices
+	textObj   *scene.Object // text being edited (not yet in doc)
+	editText  *scene.Object // existing text object being re-edited
+	textCaret int           // caret position (rune index) within textObj.Text
 
 	clipboard []*scene.Object
 
@@ -173,6 +174,12 @@ type Model struct {
 
 	antPhase   int  // marching-ants animation frame
 	antRunning bool // ant heartbeat currently scheduled
+
+	alignGuides []guideLine // smart-alignment guides for the current drag
+
+	// Keyboard-only drawing: a virtual cursor placed with the arrow keys.
+	kbDraw   bool
+	kbCursor geom.Vec
 }
 
 type hitRegion struct {

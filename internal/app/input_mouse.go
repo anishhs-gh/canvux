@@ -233,6 +233,7 @@ func (m *Model) textPress(w geom.Vec) {
 	o.P1 = m.maybeSnap(w)
 	m.textObj = o
 	m.editText = nil
+	m.textCaret = 0
 }
 
 func (m *Model) beginTextEdit(obj *scene.Object) {
@@ -240,6 +241,7 @@ func (m *Model) beginTextEdit(obj *scene.Object) {
 	m.editText = obj
 	c := obj.Clone()
 	m.textObj = c
+	m.textCaret = len([]rune(c.Text))
 	m.doc.Remove(obj.ID) // temporarily lift out; re-added on commit
 }
 
@@ -280,7 +282,14 @@ func (m *Model) mouseMotion(msg tea.MouseMsg) tea.Cmd {
 				}
 			}
 		} else {
-			m.draft.P2 = m.constrained(m.maybeSnap(w), msg.Shift)
+			p := m.constrained(m.maybeSnap(w), msg.Shift)
+			m.alignGuides = nil
+			if !msg.Shift {
+				var guides []guideLine
+				p, guides = m.snapPointToObjects(p, nil, m.alignTolerance())
+				m.alignGuides = guides
+			}
+			m.draft.P2 = p
 			if m.draft.Kind == scene.KindBezier {
 				// Start as a straight curve; handles are edited afterwards.
 				d := m.draft.P2.Sub(m.draft.P1)
@@ -301,6 +310,20 @@ func (m *Model) mouseMotion(msg tea.MouseMsg) tea.Cmd {
 				o.Translate(d)
 			}
 			m.dirty = true
+		}
+		// Smart guides: pull the selection onto nearby object edges/centers.
+		m.alignGuides = nil
+		if !msg.Shift {
+			if b, ok := m.selectionBounds(); ok {
+				res := m.alignSnap(b, m.sel, m.alignTolerance())
+				if res.dx != 0 || res.dy != 0 {
+					adj := geom.V(res.dx, res.dy)
+					for _, o := range m.selection() {
+						o.Translate(adj)
+					}
+				}
+				m.alignGuides = res.guides
+			}
 		}
 		m.drag.last = w
 	case dragResize:
@@ -398,6 +421,7 @@ func (m *Model) mouseRelease(msg tea.MouseMsg) tea.Cmd {
 		}
 	}
 	m.drag = dragState{}
+	m.alignGuides = nil
 	return nil
 }
 
@@ -413,6 +437,14 @@ func (m *Model) commitDraft() {
 		if len(d.Points) < 2 {
 			return
 		}
+		// Smooth & decimate freehand strokes so they're clean and compact.
+		// Variable-width strokes carry a per-point width, so resample that too.
+		tol := 0.6 / m.view().Zoom
+		if len(d.Widths) == len(d.Points) {
+			d.Points, d.Widths = smoothVarStroke(d.Points, d.Widths, tol)
+		} else {
+			d.Points = geom.SmoothStroke(d.Points, tol)
+		}
 	default:
 		if d.P1.Dist(d.P2) < 0.3/m.view().Zoom {
 			return
@@ -422,6 +454,29 @@ func (m *Model) commitDraft() {
 	m.doc.Add(d)
 	m.clearSelection()
 	m.sel[d.ID] = true
+}
+
+// smoothVarStroke decimates a variable-width stroke by distance and resamples
+// widths onto the kept points (nearest original point), then leaves the point
+// count as-is (no Chaikin, to keep width/point correspondence simple).
+func smoothVarStroke(pts []geom.Vec, widths []float64, tol float64) ([]geom.Vec, []float64) {
+	if len(pts) < 3 {
+		return pts, widths
+	}
+	// Greedy distance decimation preserving indices so widths stay aligned.
+	keptP := []geom.Vec{pts[0]}
+	keptW := []float64{widths[0]}
+	last := pts[0]
+	for i := 1; i < len(pts)-1; i++ {
+		if pts[i].Dist(last) >= tol {
+			keptP = append(keptP, pts[i])
+			keptW = append(keptW, widths[i])
+			last = pts[i]
+		}
+	}
+	keptP = append(keptP, pts[len(pts)-1])
+	keptW = append(keptW, widths[len(widths)-1])
+	return keptP, keptW
 }
 
 func absInt(v int) int {

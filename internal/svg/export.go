@@ -104,8 +104,23 @@ func writeObject(b *strings.Builder, o *scene.Object) {
 			fmt.Fprintf(b, `  <polyline points="%s"%s%s/>`+"\n", pointList(o.Points), style, tr)
 		}
 	case scene.KindText:
-		fmt.Fprintf(b, `  <text x="%s" y="%s" font-family="monospace" font-size="2" fill="%s"%s%s%s>%s</text>`+"\n",
-			f(o.P1.X), f(o.P1.Y+1.6), o.Stroke.Hex(), opacityAttr(o), filterAttr(o), tr, escape(o.Text))
+		lines := scene.TextLines(o.Text)
+		if len(lines) == 1 {
+			fmt.Fprintf(b, `  <text x="%s" y="%s" font-family="monospace" font-size="2" fill="%s"%s%s%s>%s</text>`+"\n",
+				f(o.P1.X), f(o.P1.Y+1.6), o.Stroke.Hex(), opacityAttr(o), filterAttr(o), tr, escape(o.Text))
+		} else {
+			// Multi-line: one <tspan> per line, stepped down by the line height.
+			fmt.Fprintf(b, `  <text x="%s" y="%s" font-family="monospace" font-size="2" fill="%s"%s%s%s>`+"\n",
+				f(o.P1.X), f(o.P1.Y+1.6), o.Stroke.Hex(), opacityAttr(o), filterAttr(o), tr)
+			for i, ln := range lines {
+				dy := "0"
+				if i > 0 {
+					dy = "2"
+				}
+				fmt.Fprintf(b, `    <tspan x="%s" dy="%s">%s</tspan>`+"\n", f(o.P1.X), dy, escape(ln))
+			}
+			b.WriteString("  </text>\n")
+		}
 	}
 }
 

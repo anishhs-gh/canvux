@@ -13,6 +13,13 @@ import (
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
+	// Keyboard-draw mode intercepts navigation/placement keys first.
+	if m.kbDraw {
+		if cmd, handled := m.handleKbDrawKey(key, msg); handled {
+			return cmd
+		}
+	}
+
 	// Context-sensitive keys are handled here, not via the rebindable keymap,
 	// because their meaning depends on the current mode/selection.
 	switch key {
@@ -133,6 +140,14 @@ func (m *Model) cycleSelection(delta int) {
 // --- text editing mode ---
 
 func (m *Model) handleTextKey(msg tea.KeyMsg) tea.Cmd {
+	r := []rune(m.textObj.Text)
+	m.textCaret = clampInt(m.textCaret, 0, len(r))
+	insert := func(s string) {
+		ins := []rune(s)
+		r = append(r[:m.textCaret], append(ins, r[m.textCaret:]...)...)
+		m.textObj.Text = string(r)
+		m.textCaret += len(ins)
+	}
 	switch msg.String() {
 	case "esc":
 		if m.editText != nil {
@@ -156,20 +171,87 @@ func (m *Model) handleTextKey(msg tea.KeyMsg) tea.Cmd {
 		m.doc.Add(t)
 		m.clearSelection()
 		m.sel[t.ID] = true
-		m.setStatus(statusOK, "text: %q", t.Text)
+		m.setStatus(statusOK, "text: %q", firstLineOf(t.Text))
+	case "ctrl+j", "alt+enter", "shift+enter":
+		// Insert a newline (Enter commits, so multi-line needs its own key).
+		insert("\n")
 	case "backspace":
-		r := []rune(m.textObj.Text)
-		if len(r) > 0 {
-			m.textObj.Text = string(r[:len(r)-1])
+		if m.textCaret > 0 {
+			r = append(r[:m.textCaret-1], r[m.textCaret:]...)
+			m.textObj.Text = string(r)
+			m.textCaret--
 		}
+	case "delete":
+		if m.textCaret < len(r) {
+			r = append(r[:m.textCaret], r[m.textCaret+1:]...)
+			m.textObj.Text = string(r)
+		}
+	case "left":
+		m.textCaret = maxInt(0, m.textCaret-1)
+	case "right":
+		m.textCaret = minInt(len(r), m.textCaret+1)
+	case "up":
+		m.textCaret = caretVertical(r, m.textCaret, -1)
+	case "down":
+		m.textCaret = caretVertical(r, m.textCaret, +1)
+	case "home":
+		m.textCaret = lineStart(r, m.textCaret)
+	case "end":
+		m.textCaret = lineEnd(r, m.textCaret)
 	default:
 		if msg.Type == tea.KeySpace {
-			m.textObj.Text += " "
+			insert(" ")
 		} else if msg.Type == tea.KeyRunes {
-			m.textObj.Text += string(msg.Runes)
+			insert(string(msg.Runes))
 		}
 	}
 	return nil
+}
+
+// --- caret navigation helpers (operate on rune slices) ---
+
+func lineStart(r []rune, caret int) int {
+	i := caret
+	for i > 0 && r[i-1] != '\n' {
+		i--
+	}
+	return i
+}
+
+func lineEnd(r []rune, caret int) int {
+	i := caret
+	for i < len(r) && r[i] != '\n' {
+		i++
+	}
+	return i
+}
+
+// caretVertical moves the caret up/down a visual line, keeping its column.
+func caretVertical(r []rune, caret, dir int) int {
+	col := caret - lineStart(r, caret)
+	if dir < 0 {
+		ls := lineStart(r, caret)
+		if ls == 0 {
+			return caret // already on the first line
+		}
+		prevStart := lineStart(r, ls-1)
+		prevLen := ls - 1 - prevStart
+		return prevStart + minInt(col, prevLen)
+	}
+	le := lineEnd(r, caret)
+	if le >= len(r) {
+		return caret // already on the last line
+	}
+	nextStart := le + 1
+	nextLen := lineEnd(r, nextStart) - nextStart
+	return nextStart + minInt(col, nextLen)
+}
+
+func firstLineOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i] + "…"
+	}
+	return s
 }
 
 // --- prompt mode ---
