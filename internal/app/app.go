@@ -177,6 +177,14 @@ type Model struct {
 
 	alignGuides []guideLine // smart-alignment guides for the current drag
 
+	// Reusable render buffers, resized in place to avoid per-frame allocation.
+	pb   *render.PixelBuf
+	grid *render.CellGrid
+
+	// pendingOSC is a one-shot terminal escape (e.g. OSC 52 clipboard) emitted
+	// with the next frame, then cleared.
+	pendingOSC string
+
 	// Keyboard-only drawing: a virtual cursor placed with the arrow keys.
 	kbDraw   bool
 	kbCursor geom.Vec
@@ -226,7 +234,45 @@ func New(path string) (*Model, error) {
 		m.applyConfig(cfg)
 	}
 	m.plugins = plugin.Discover()
+	m.checkAutosaveRecovery()
 	return m, nil
+}
+
+// checkAutosaveRecovery prompts the user to recover from <file>.autosave when
+// one exists and is newer than the file on disk (e.g. after a crash).
+func (m *Model) checkAutosaveRecovery() {
+	if m.path == "" {
+		return
+	}
+	auto := m.path + ".autosave"
+	ai, err := os.Stat(auto)
+	if err != nil {
+		return
+	}
+	// Newer than the main file (or the main file doesn't exist yet).
+	if fi, err := os.Stat(m.path); err == nil && !ai.ModTime().After(fi.ModTime()) {
+		return
+	}
+	m.prompt = &promptState{
+		label: "Recover newer autosave for this file? [y/n]",
+		yesNo: true,
+		onYes: func(m *Model) tea.Cmd {
+			doc, err := scene.Load(auto)
+			if err != nil {
+				m.setStatus(statusErr, "recover failed: %v", err)
+				return nil
+			}
+			m.doc = doc
+			m.dirty = true // recovered content isn't saved to the main file yet
+			m.setStatus(statusOK, "recovered from %s — save to keep", auto)
+			return nil
+		},
+		onNo: func(m *Model) tea.Cmd {
+			os.Remove(auto)
+			m.setStatus(statusInfo, "discarded autosave")
+			return nil
+		},
+	}
 }
 
 // applyConfig folds loaded user preferences into the model.
@@ -299,12 +345,24 @@ func (m *Model) wantsAnimation() bool {
 
 func (m *Model) Init() tea.Cmd {
 	m.antRunning = true
-	cmds := []tea.Cmd{autosaveCmd(m.autosaveSecs), antTickCmd()}
+	cmds := []tea.Cmd{autosaveCmd(m.autosaveSecs), antTickCmd(), tea.SetWindowTitle(m.windowTitle())}
 	if m.collab != nil {
 		cmds = append(cmds, collabTickCmd())
 	}
 	return tea.Batch(cmds...)
 }
+
+// windowTitle names the terminal window/tab after the open file.
+func (m *Model) windowTitle() string {
+	name := m.path
+	if name == "" {
+		name = "untitled"
+	}
+	return "Canvux — " + name
+}
+
+// setTitleCmd returns a command that refreshes the window title.
+func (m *Model) setTitleCmd() tea.Cmd { return tea.SetWindowTitle(m.windowTitle()) }
 
 // canvasRows is the number of terminal rows dedicated to the canvas.
 func (m *Model) canvasRows() int { return maxInt(1, m.h-2) }
@@ -422,6 +480,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, collabTickCmd()
 	case pluginResult:
 		m.handlePluginResult(msg)
+		return m, nil
+	case clipboardResult:
+		m.handleClipboardResult(msg)
 		return m, nil
 	case antTick:
 		m.antPhase++

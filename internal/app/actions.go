@@ -44,6 +44,7 @@ func actionTable() []Action {
 		{"edit.undo", "Undo", (*Model).cmdUndo},
 		{"edit.redo", "Redo", (*Model).cmdRedo},
 		{"edit.copy", "Copy Selection", (*Model).cmdCopy},
+		{"edit.copy-svg", "Copy as SVG to System Clipboard", (*Model).cmdCopySVG},
 		{"edit.paste", "Paste", (*Model).cmdPaste},
 		{"edit.duplicate", "Duplicate Selection", (*Model).cmdDuplicate},
 		{"edit.delete", "Delete Selection", (*Model).cmdDelete},
@@ -153,7 +154,7 @@ func DefaultKeymap() map[string]string {
 
 		"u": "edit.undo", "ctrl+z": "edit.undo",
 		"U": "edit.redo", "ctrl+y": "edit.redo", "ctrl+r": "edit.redo",
-		"d": "edit.duplicate", "Y": "edit.copy", "V": "edit.paste",
+		"d": "edit.duplicate", "Y": "edit.copy", "V": "edit.paste", "ctrl+shift+c": "edit.copy-svg",
 		"delete": "edit.delete", "backspace": "edit.delete", "ctrl+a": "edit.select-all",
 		"]": "edit.raise", "[": "edit.lower",
 		".": "edit.rotate-cw", ",": "edit.rotate-ccw", ">": "edit.rotate-cw-fine", "<": "edit.rotate-ccw-fine",

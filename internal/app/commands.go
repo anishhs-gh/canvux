@@ -99,7 +99,7 @@ func (m *Model) saveTo(path string) tea.Cmd {
 	m.dirty = false
 	os.Remove(path + ".autosave")
 	m.setStatus(statusOK, "saved %s (%d objects)", path, len(m.doc.Objects))
-	return nil
+	return m.setTitleCmd()
 }
 
 func (m *Model) cmdOpen() tea.Cmd {
@@ -123,7 +123,7 @@ func (m *Model) cmdOpen() tea.Cmd {
 		} else {
 			m.setStatus(statusOK, "opened %s (%d objects)", v, len(doc.Objects))
 		}
-		return m.cmdZoomFit()
+		return tea.Batch(m.cmdZoomFit(), m.setTitleCmd())
 	}
 	prompt := func(m *Model) tea.Cmd {
 		m.prompt = &promptState{label: "Open file", value: "", confirm: open}
@@ -140,7 +140,7 @@ func (m *Model) cmdNew() tea.Cmd {
 		m.hist = history.Stack{}
 		m.clearSelection()
 		m.setStatus(statusOK, "new document")
-		return nil
+		return m.setTitleCmd()
 	}
 	return m.confirmIfDirty("Discard unsaved changes and start new?", reset)
 }
