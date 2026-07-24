@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/anishhs-gh/canvux/internal/collab"
+	"github.com/anishhs-gh/canvux/internal/config"
 	"github.com/anishhs-gh/canvux/internal/geom"
 	"github.com/anishhs-gh/canvux/internal/history"
 	"github.com/anishhs-gh/canvux/internal/plugin"
@@ -77,6 +78,7 @@ const (
 	ovColorFill
 	ovLayers
 	ovStencils
+	ovOutline
 )
 
 // promptState is a single-line input on the status row.
@@ -141,10 +143,18 @@ type Model struct {
 	helpTop    int
 	stencilSel int
 	stencilQry string
+	outlineSel int
+	outlineQry string
 	prompt     *promptState
 	statusMsg  string
 	statusLvl  statusLevel
 	statusAt   time.Time
+
+	// Rebindable keymap (key string -> action ID) and theme/palette cursors.
+	keymap       map[string]string
+	themeIdx     int
+	paletteIdx   int
+	autosaveSecs int
 
 	mouseCell  struct{ X, Y int }
 	mouseWorld geom.Vec
@@ -174,19 +184,22 @@ type hitRegion struct {
 // frames. Defaults to auto-detection when unset.
 func (m *Model) SetColorProfile(p render.Profile) { m.profile = p }
 
-// New builds the editor model, optionally loading a file.
+// New builds the editor model, optionally loading a file. User config is
+// applied on top of the built-in defaults.
 func New(path string) (*Model, error) {
 	m := &Model{
-		doc:         scene.NewDoc(),
-		theme:       DefaultTheme,
-		profile:     render.DetectProfile(),
-		tool:        ToolSelect,
-		strokeIdx:   1,
-		fillIdx:     3,
-		strokeWidth: 1,
-		opacity:     1,
-		sel:         map[uint64]bool{},
-		showGrid:    true,
+		doc:          scene.NewDoc(),
+		theme:        DefaultTheme,
+		profile:      render.DetectProfile(),
+		tool:         ToolSelect,
+		strokeIdx:    1,
+		fillIdx:      3,
+		strokeWidth:  1,
+		opacity:      1,
+		sel:          map[uint64]bool{},
+		showGrid:     true,
+		keymap:       DefaultKeymap(),
+		autosaveSecs: 30,
 	}
 	if path != "" {
 		if _, err := os.Stat(path); err == nil {
@@ -198,14 +211,71 @@ func New(path string) (*Model, error) {
 		}
 		m.path = path
 	}
+	cfg, err := config.Load()
+	if err != nil {
+		// A broken config shouldn't stop the editor; surface it in the status bar.
+		m.setStatus(statusErr, "config: %v", err)
+	} else {
+		m.applyConfig(cfg)
+	}
 	m.plugins = plugin.Discover()
 	return m, nil
 }
 
+// applyConfig folds loaded user preferences into the model.
+func (m *Model) applyConfig(cfg config.Config) {
+	if cfg.Theme != "" {
+		if th, ok := ThemeByName(cfg.Theme); ok {
+			m.theme = th
+			for i, t := range Themes {
+				if t.Name == cfg.Theme {
+					m.themeIdx = i
+				}
+			}
+		}
+	}
+	if cfg.Palette != "" && SetActivePalette(cfg.Palette) {
+		for i, p := range Palettes {
+			if p.Name == cfg.Palette {
+				m.paletteIdx = i
+			}
+		}
+	}
+	if cfg.RenderMode == "braille" {
+		m.mode = render.ModeBraille
+	} else if cfg.RenderMode == "block" {
+		m.mode = render.ModeHalfBlock
+	}
+	if cfg.Color != "" {
+		if p, ok := render.ParseProfile(cfg.Color); ok {
+			m.profile = p
+		}
+	}
+	if cfg.Grid != nil {
+		m.showGrid = *cfg.Grid
+	}
+	if cfg.Snap != nil {
+		m.snap = *cfg.Snap
+	}
+	if cfg.Autosave != nil && *cfg.Autosave > 0 {
+		m.autosaveSecs = *cfg.Autosave
+	}
+	for key, id := range cfg.Keys {
+		if _, ok := actionByID(id); ok {
+			m.keymap[key] = id
+		}
+	}
+	m.strokeIdx = clampInt(m.strokeIdx, 0, len(Palette)-1)
+	m.fillIdx = clampInt(m.fillIdx, 0, len(Palette)-1)
+}
+
 type autosaveTick time.Time
 
-func autosaveCmd() tea.Cmd {
-	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg { return autosaveTick(t) })
+func autosaveCmd(secs int) tea.Cmd {
+	if secs <= 0 {
+		secs = 30
+	}
+	return tea.Tick(time.Duration(secs)*time.Second, func(t time.Time) tea.Msg { return autosaveTick(t) })
 }
 
 // antTick drives the marching-ants selection animation.
@@ -222,7 +292,7 @@ func (m *Model) wantsAnimation() bool {
 
 func (m *Model) Init() tea.Cmd {
 	m.antRunning = true
-	cmds := []tea.Cmd{autosaveCmd(), antTickCmd()}
+	cmds := []tea.Cmd{autosaveCmd(m.autosaveSecs), antTickCmd()}
 	if m.collab != nil {
 		cmds = append(cmds, collabTickCmd())
 	}
@@ -336,7 +406,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setStatus(statusInfo, "autosaved %s.autosave", m.path)
 			}
 		}
-		return m, autosaveCmd()
+		return m, autosaveCmd(m.autosaveSecs)
 	case collabTick:
 		if m.collab == nil {
 			return m, nil

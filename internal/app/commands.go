@@ -18,104 +18,41 @@ import (
 	"github.com/anishhs-gh/canvux/internal/svg"
 )
 
-// Command is a palette-invokable action.
+// Command is one row in the command palette: a label, its current key hint,
+// and the action to run.
 type Command struct {
 	Name string
 	Keys string
 	Do   func(m *Model) tea.Cmd
 }
 
-// commands is the master registry, shown in the palette in this order.
-func commands() []Command {
-	return []Command{
-		{"Tool: Select", "v", func(m *Model) tea.Cmd { m.setTool(ToolSelect); return nil }},
-		{"Tool: Pan", "space", func(m *Model) tea.Cmd { m.setTool(ToolPan); return nil }},
-		{"Tool: Brush", "b", func(m *Model) tea.Cmd { m.setTool(ToolBrush); return nil }},
-		{"Tool: Line", "l", func(m *Model) tea.Cmd { m.setTool(ToolLine); return nil }},
-		{"Tool: Rectangle", "r", func(m *Model) tea.Cmd { m.setTool(ToolRect); return nil }},
-		{"Tool: Ellipse", "e", func(m *Model) tea.Cmd { m.setTool(ToolEllipse); return nil }},
-		{"Tool: Arrow", "a", func(m *Model) tea.Cmd { m.setTool(ToolArrow); return nil }},
-		{"Tool: Polygon", "p", func(m *Model) tea.Cmd { m.setTool(ToolPolygon); return nil }},
-		{"Tool: Curve (bézier)", "n", func(m *Model) tea.Cmd { m.setTool(ToolBezier); return nil }},
-		{"Tool: Text", "t", func(m *Model) tea.Cmd { m.setTool(ToolText); return nil }},
-		{"Tool: Eraser", "x", func(m *Model) tea.Cmd { m.setTool(ToolEraser); return nil }},
-		{"Save", "ctrl+s", (*Model).cmdSave},
-		{"Save As…", "", (*Model).cmdSaveAs},
-		{"Open…", "ctrl+o", (*Model).cmdOpen},
-		{"Export SVG / PNG…", "ctrl+e", (*Model).cmdExport},
-		{"Import SVG…", "", (*Model).cmdImportSVG},
-		{"New Document", "", (*Model).cmdNew},
-		{"Undo", "u / ctrl+z", (*Model).cmdUndo},
-		{"Redo", "U / ctrl+y", (*Model).cmdRedo},
-		{"Copy Selection", "Y", (*Model).cmdCopy},
-		{"Paste", "V", (*Model).cmdPaste},
-		{"Duplicate Selection", "d", (*Model).cmdDuplicate},
-		{"Delete Selection", "del", (*Model).cmdDelete},
-		{"Select All", "ctrl+a", (*Model).cmdSelectAll},
-		{"Group: Raise (z-order)", "]", func(m *Model) tea.Cmd { return m.cmdZ(true) }},
-		{"Group: Lower (z-order)", "[", func(m *Model) tea.Cmd { return m.cmdZ(false) }},
-		{"Rotate +15°", ".", func(m *Model) tea.Cmd { return m.cmdRotate(15) }},
-		{"Rotate -15°", ",", func(m *Model) tea.Cmd { return m.cmdRotate(-15) }},
-		{"Stroke Color…", "c", func(m *Model) tea.Cmd { m.overlay = ovColorStroke; m.colorSel = m.strokeIdx; return nil }},
-		{"Fill Color…", "C", func(m *Model) tea.Cmd { m.overlay = ovColorFill; m.colorSel = m.fillIdx; return nil }},
-		{"Toggle Fill", "f", (*Model).cmdToggleFill},
-		{"Toggle Dashed", "D", (*Model).cmdToggleDash},
-		{"Toggle Shadow", "S", (*Model).cmdToggleShadow},
-		{"Blur +", "B", func(m *Model) tea.Cmd { return m.cmdBlur(0.5) }},
-		{"Blur -", "ctrl+b", func(m *Model) tea.Cmd { return m.cmdBlur(-0.5) }},
-		{"Gradient: Pick End Color…", "C then g", func(m *Model) tea.Cmd {
-			m.overlay = ovColorFill
-			m.colorSel = m.fillIdx
-			m.setStatus(statusInfo, "pick a color, press g to set it as the gradient end")
-			return nil
-		}},
-		{"Gradient: Clear", "C then x", func(m *Model) tea.Cmd {
-			m.applyStyle("clear gradient", func(o *scene.Object) { o.Fill2 = nil })
-			return nil
-		}},
-		{"Gradient: Rotate +45°", "", (*Model).cmdGradAngle},
-		{"Brush: Toggle Variable Width", "", func(m *Model) tea.Cmd {
-			m.varBrush = !m.varBrush
-			m.setStatus(statusInfo, "variable-width brush: %v", m.varBrush)
-			return nil
-		}},
-		{"Insert Stencil…", "i", func(m *Model) tea.Cmd {
-			m.overlay = ovStencils
-			m.stencilQry = ""
-			m.stencilSel = 0
-			return nil
-		}},
-		{"Stroke Width +", "+w", func(m *Model) tea.Cmd { return m.cmdStrokeWidth(0.5) }},
-		{"Stroke Width -", "-w", func(m *Model) tea.Cmd { return m.cmdStrokeWidth(-0.5) }},
-		{"Opacity +10%", "", func(m *Model) tea.Cmd { return m.cmdOpacity(0.1) }},
-		{"Opacity -10%", "", func(m *Model) tea.Cmd { return m.cmdOpacity(-0.1) }},
-		{"Zoom In", "+", func(m *Model) tea.Cmd { m.zoomAt(m.doc.Camera.Center, 1.25); return nil }},
-		{"Zoom Out", "-", func(m *Model) tea.Cmd { m.zoomAt(m.doc.Camera.Center, 0.8); return nil }},
-		{"Zoom 100%", "0", func(m *Model) tea.Cmd { m.doc.Camera.Zoom = 2; return nil }},
-		{"Zoom to Fit", "F", (*Model).cmdZoomFit},
-		{"Toggle Grid", "g", func(m *Model) tea.Cmd { m.showGrid = !m.showGrid; return nil }},
-		{"Toggle Snap to Grid", "G", func(m *Model) tea.Cmd {
-			m.snap = !m.snap
-			m.setStatus(statusInfo, "snap: %v", m.snap)
-			return nil
-		}},
-		{"Toggle Render Mode (block/braille)", "M", (*Model).cmdToggleMode},
-		{"Layers…", "L", func(m *Model) tea.Cmd { m.overlay = ovLayers; return nil }},
-		{"Presentation Mode (layers = slides)", "P", (*Model).enterPresent},
-		{"Toggle Whiteboard (light) Theme", "", func(m *Model) tea.Cmd {
-			if m.theme.CanvasBG == DefaultTheme.CanvasBG {
-				m.theme = LightTheme
-				m.setStatus(statusInfo, "whiteboard theme")
-			} else {
-				m.theme = DefaultTheme
-				m.setStatus(statusInfo, "dark theme")
-			}
-			return nil
-		}},
-		{"Import Image (pixel grid)…", "", (*Model).cmdImportImage},
-		{"Help", "?", func(m *Model) tea.Cmd { m.overlay = ovHelp; m.helpTop = 0; return nil }},
-		{"Quit", "q", (*Model).cmdQuit},
+// commands builds the palette rows from the shared action table, filling each
+// key hint from the *active* keymap so custom rebindings are reflected.
+func (m *Model) commands() []Command {
+	table := actionTable()
+	out := make([]Command, 0, len(table))
+	for _, a := range table {
+		out = append(out, Command{Name: a.Name, Keys: m.keyForAction(a.ID), Do: a.Do})
 	}
+	return out
+}
+
+// cmdCycleTheme steps dark → light → high-contrast.
+func (m *Model) cmdCycleTheme() tea.Cmd {
+	m.themeIdx = (m.themeIdx + 1) % len(Themes)
+	m.theme = Themes[m.themeIdx].Theme
+	m.setStatus(statusInfo, "theme: %s", Themes[m.themeIdx].Name)
+	return nil
+}
+
+// cmdCyclePalette steps the drawing palette default → colorblind → high-contrast.
+func (m *Model) cmdCyclePalette() tea.Cmd {
+	m.paletteIdx = (m.paletteIdx + 1) % len(Palettes)
+	SetActivePalette(Palettes[m.paletteIdx].Name)
+	m.strokeIdx = clampInt(m.strokeIdx, 0, len(Palette)-1)
+	m.fillIdx = clampInt(m.fillIdx, 0, len(Palette)-1)
+	m.setStatus(statusInfo, "palette: %s", Palettes[m.paletteIdx].Name)
+	return nil
 }
 
 func (m *Model) setTool(t Tool) {

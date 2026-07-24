@@ -1,0 +1,14 @@
+{
+  "theme": "dark",
+  "palette": "default",
+  "renderMode": "block",
+  "color": "auto",
+  "grid": true,
+  "snap": false,
+  "autosaveSeconds": 30,
+  "keys": {
+    "ctrl+d": "edit.duplicate",
+    "ctrl+g": "view.toggle-grid",
+    "T": "view.cycle-theme"
+  }
+}
