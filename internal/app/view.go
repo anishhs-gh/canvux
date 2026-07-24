@@ -36,6 +36,7 @@ func (m *Model) View() string {
 		render.DrawObject(pb, v, m.draft)
 	}
 	m.drawPolygonPreview(pb, v)
+	m.drawAlignGuides(pb, v)
 	m.drawSelection(pb, v)
 	m.drawMarquee(pb, v)
 
@@ -73,11 +74,19 @@ func (m *Model) drawPeers(g *render.CellGrid, v render.View) {
 // precisely (the terminal's own cursor is hidden under mouse mode). It's
 // suppressed while panning and over the chrome rows.
 func (m *Model) drawCursor(g *render.CellGrid) {
+	if m.overlay != ovNone || m.prompt != nil {
+		return
+	}
+	// In keyboard-draw mode, draw the virtual cursor at its world position.
+	if m.kbDraw {
+		m.drawKbCursor(g)
+		return
+	}
 	cx, cy := m.mouseCell.X, m.mouseCell.Y
 	if cy < 1 || cy >= m.h-1 || cx < 0 || cx >= m.w {
 		return
 	}
-	if m.drag.kind == dragPan || m.overlay != ovNone || m.prompt != nil {
+	if m.drag.kind == dragPan {
 		return
 	}
 	// Tool-specific glyph: a ✛ for pointer tools, a small nib for drawing.
@@ -98,6 +107,25 @@ func (m *Model) drawCursor(g *render.CellGrid) {
 	}
 	under := g.Get(cx, cy)
 	g.Set(cx, cy, render.Cell{Ch: glyph, Fg: col, Bg: under.Bg})
+}
+
+// drawKbCursor renders the virtual keyboard-draw cursor as a bold crosshair
+// with short arms, so it's easy to track without a mouse.
+func (m *Model) drawKbCursor(g *render.CellGrid) {
+	sx, sy := m.mode.PixelScale()
+	p := m.view().ToPixel(m.maybeSnap(m.kbCursor))
+	cx, cy := int(p.X)/sx, int(p.Y)/sy+1
+	col := m.theme.Handle
+	put := func(x, y int, ch rune) {
+		if x >= 0 && x < m.w && y >= 1 && y < m.h-1 {
+			g.Set(x, y, render.Cell{Ch: ch, Fg: col, Bg: g.Get(x, y).Bg})
+		}
+	}
+	put(cx-1, cy, '─')
+	put(cx+1, cy, '─')
+	put(cx, cy-1, '│')
+	put(cx, cy+1, '│')
+	put(cx, cy, '✛')
 }
 
 // drawMeasurements shows live dimensions/angle near the cursor while drawing
@@ -266,6 +294,17 @@ func (m *Model) antRect(g *render.CellGrid, x0, y0, x1, y1 int) {
 	corner(x1, y1, '┘')
 }
 
+// drawAlignguides renders the smart-alignment guide lines for the active drag.
+func (m *Model) drawAlignGuides(pb *render.PixelBuf, v render.View) {
+	for _, gl := range m.alignGuides {
+		o := &scene.Object{
+			Kind: scene.KindLine, P1: gl.a, P2: gl.b,
+			Stroke: m.theme.Marquee, StrokeWidth: m.hairline(), Opacity: 0.9, Dashed: true,
+		}
+		render.DrawObject(pb, v, o)
+	}
+}
+
 func (m *Model) drawMarquee(pb *render.PixelBuf, v render.View) {
 	if m.drag.kind != dragMarquee {
 		return
@@ -278,24 +317,38 @@ func (m *Model) drawMarquee(pb *render.PixelBuf, v render.View) {
 	render.DrawObject(pb, v, o)
 }
 
-// drawTexts composits text objects at the cell layer (terminal-native text).
+// drawTexts composits text objects at the cell layer (terminal-native text),
+// one cell row per '\n'-separated line. While editing, the caret is drawn at
+// its row/column.
 func (m *Model) drawTexts(g *render.CellGrid, v render.View) {
 	sx, sy := m.mode.PixelScale()
 	place := func(o *scene.Object, editing bool) {
 		p := v.ToPixel(o.P1)
-		cx := int(p.X) / sx
-		cy := int(p.Y)/sy + 1
-		for i, r := range o.Text {
-			under := g.Get(cx+i, cy)
-			bg := under.Bg
-			if m.sel[o.ID] {
-				bg = m.theme.OverlaySel
+		cx0 := int(p.X) / sx
+		cy0 := int(p.Y)/sy + 1
+		lines := scene.TextLines(o.Text)
+		for li, line := range lines {
+			cy := cy0 + li
+			for i, r := range []rune(line) {
+				under := g.Get(cx0+i, cy)
+				bg := under.Bg
+				if m.sel[o.ID] {
+					bg = m.theme.OverlaySel
+				}
+				g.Set(cx0+i, cy, render.Cell{Ch: r, Fg: o.Stroke, Bg: bg})
 			}
-			g.Set(cx+i, cy, render.Cell{Ch: r, Fg: o.Stroke, Bg: bg})
 		}
 		if editing {
-			n := len([]rune(o.Text))
-			g.Set(cx+n, cy, render.Cell{Ch: ' ', Fg: m.theme.AccentText, Bg: m.theme.Accent})
+			// Locate the caret's line/column from the rune index.
+			row, col := caretRowCol([]rune(o.Text), m.textCaret)
+			cx := cx0 + col
+			cy := cy0 + row
+			under := g.Get(cx, cy)
+			ch := under.Ch
+			if ch == 0 || ch == ' ' {
+				ch = ' '
+			}
+			g.Set(cx, cy, render.Cell{Ch: ch, Fg: m.theme.AccentText, Bg: m.theme.Accent})
 		}
 	}
 	for _, o := range m.doc.VisibleObjects() {
@@ -306,6 +359,22 @@ func (m *Model) drawTexts(g *render.CellGrid, v render.View) {
 	if m.textObj != nil {
 		place(m.textObj, true)
 	}
+}
+
+// caretRowCol converts a rune-index caret into (row, column) across lines.
+func caretRowCol(r []rune, caret int) (row, col int) {
+	if caret > len(r) {
+		caret = len(r)
+	}
+	for i := 0; i < caret; i++ {
+		if r[i] == '\n' {
+			row++
+			col = 0
+		} else {
+			col++
+		}
+	}
+	return row, col
 }
 
 // --- toolbar ---
@@ -467,7 +536,10 @@ func (m *Model) drawStatus(g *render.CellGrid) {
 
 func (m *Model) toolHint() string {
 	if m.textObj != nil {
-		return "type text · enter commit · esc cancel"
+		return "type · ←→↑↓ move caret · ctrl+j newline · enter commit · esc cancel"
+	}
+	if m.kbDraw {
+		return "keyboard draw · arrows move · enter set point · K/esc exit"
 	}
 	switch m.tool {
 	case ToolSelect:

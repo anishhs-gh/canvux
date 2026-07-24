@@ -72,25 +72,29 @@ func drawTextPx(s render.Surface, v render.View, o *scene.Object) {
 	origin := v.ToPixel(o.P1)
 	cellW := v.Zoom // one world unit per character cell
 	scale := math.Max(1, cellW/4)
-	x := origin.X
-	for _, r := range o.Text {
-		g, ok := microFont[r]
-		if !ok {
-			g = microFont['?']
-		}
-		for row := 0; row < 5; row++ {
-			for col := 0; col < 3; col++ {
-				if g[row]&(1<<(2-col)) == 0 {
-					continue
-				}
-				for dy := 0; dy < int(scale); dy++ {
-					for dx := 0; dx < int(scale); dx++ {
-						s.Set(int(x)+col*int(scale)+dx, int(origin.Y)+row*int(scale)+dy, o.Stroke, o.Opacity)
+	lineH := 2 * cellW // matches the 2-world-unit line step
+	for li, line := range scene.TextLines(o.Text) {
+		x := origin.X
+		baseY := origin.Y + float64(li)*lineH
+		for _, r := range line {
+			g, ok := microFont[r]
+			if !ok {
+				g = microFont['?']
+			}
+			for row := 0; row < 5; row++ {
+				for col := 0; col < 3; col++ {
+					if g[row]&(1<<(2-col)) == 0 {
+						continue
+					}
+					for dy := 0; dy < int(scale); dy++ {
+						for dx := 0; dx < int(scale); dx++ {
+							s.Set(int(x)+col*int(scale)+dx, int(baseY)+row*int(scale)+dy, o.Stroke, o.Opacity)
+						}
 					}
 				}
 			}
+			x += cellW
 		}
-		x += cellW
 	}
 }
 

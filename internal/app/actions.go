@@ -116,6 +116,7 @@ func actionTable() []Action {
 			return nil
 		}},
 		{"mode.present", "Presentation Mode (layers = slides)", (*Model).enterPresent},
+		{"mode.kbdraw", "Keyboard Draw Mode (mouse-free, toggle)", (*Model).toggleKbDraw},
 		{"help", "Help", func(m *Model) tea.Cmd { m.overlay, m.helpTop = ovHelp, 0; return nil }},
 		{"quit", "Quit", (*Model).cmdQuit},
 	}
@@ -165,6 +166,7 @@ func DefaultKeymap() map[string]string {
 
 		"ctrl+s": "file.save", "ctrl+o": "file.open", "ctrl+e": "file.export",
 		"L": "panel.layers", "i": "panel.stencils", "P": "mode.present",
+		"K": "mode.kbdraw",
 		"?": "help", "q": "quit",
 	}
 }
