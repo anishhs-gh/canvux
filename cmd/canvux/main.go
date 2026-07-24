@@ -70,13 +70,16 @@ func main() {
 	if len(pos) > 0 {
 		path = pos[0]
 	}
-	profile, ok := render.ParseProfile(colorArg)
-	if !ok {
-		exitOn(fmt.Errorf("invalid --color %q (want auto|truecolor|256|16|off)", colorArg))
-	}
 	m, err := app.New(path)
 	exitOn(err)
-	m.SetColorProfile(profile)
+	// An explicit --color overrides both auto-detection and any config value.
+	if colorArg != "" {
+		profile, ok := render.ParseProfile(colorArg)
+		if !ok {
+			exitOn(fmt.Errorf("invalid --color %q (want auto|truecolor|256|16|off)", colorArg))
+		}
+		m.SetColorProfile(profile)
+	}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	_, err = p.Run()
 	exitOn(err)

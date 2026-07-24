@@ -2,8 +2,10 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anishhs-gh/canvux/internal/render"
+	"github.com/anishhs-gh/canvux/internal/scene"
 )
 
 func (m *Model) drawOverlay(g *render.CellGrid) {
@@ -18,7 +20,95 @@ func (m *Model) drawOverlay(g *render.CellGrid) {
 		m.drawLayers(g)
 	case ovStencils:
 		m.drawStencils(g)
+	case ovOutline:
+		m.drawOutline(g)
 	}
+}
+
+// outlineObjects returns the document's objects in top-of-z-order-first order,
+// filtered by the outline query (matches kind or text).
+func (m *Model) outlineObjects() []*scene.Object {
+	vis := m.doc.VisibleObjects()
+	// Reverse so the topmost (last drawn) object is listed first.
+	out := make([]*scene.Object, 0, len(vis))
+	for i := len(vis) - 1; i >= 0; i-- {
+		out = append(out, vis[i])
+	}
+	if m.outlineQry == "" {
+		return out
+	}
+	q := strings.ToLower(m.outlineQry)
+	var filtered []*scene.Object
+	for _, o := range out {
+		if fuzzyMatch(strings.ToLower(string(o.Kind)+" "+o.Text), q) {
+			filtered = append(filtered, o)
+		}
+	}
+	return filtered
+}
+
+// describeObject renders a one-line textual summary of an object, used by the
+// Outline navigator and the accessibility status line.
+func describeObject(o *scene.Object) string {
+	b := o.Bounds()
+	switch o.Kind {
+	case scene.KindText:
+		return fmt.Sprintf("text %q at (%.0f, %.0f)", o.Text, o.P1.X, o.P1.Y)
+	case scene.KindLine, scene.KindArrow:
+		return fmt.Sprintf("%s (%.0f,%.0f)→(%.0f,%.0f)", o.Kind, o.P1.X, o.P1.Y, o.P2.X, o.P2.Y)
+	case scene.KindPath, scene.KindPolygon:
+		return fmt.Sprintf("%s %d pts at (%.0f, %.0f)", o.Kind, len(o.Points), b.Min.X, b.Min.Y)
+	default:
+		return fmt.Sprintf("%s %.0f×%.0f at (%.0f, %.0f)", o.Kind, b.W(), b.H(), b.Min.X, b.Min.Y)
+	}
+}
+
+func (m *Model) drawOutline(g *render.CellGrid) {
+	t := m.theme
+	items := m.outlineObjects()
+	maxRows := minInt(16, m.h-8)
+	w := minInt(60, m.w-4)
+	h := maxRows + 5
+	ix, iy := m.box(g, w, h, fmt.Sprintf("Outline · %d objects", len(m.doc.Objects)))
+	inner := w - 4
+
+	g.SetString(ix, iy, "› "+m.outlineQry, t.OverlayFG, t.OverlayBG)
+	g.Set(ix+2+len([]rune(m.outlineQry)), iy, render.Cell{Ch: ' ', Fg: t.AccentText, Bg: t.Accent})
+	iy++
+
+	m.outlineSel = clampInt(m.outlineSel, 0, maxInt(0, len(items)-1))
+	top := clampInt(m.outlineSel-maxRows+1, 0, maxInt(0, len(items)-maxRows))
+	for i := 0; i < maxRows && top+i < len(items); i++ {
+		o := items[top+i]
+		fg, bg := t.OverlayFG, t.OverlayBG
+		if top+i == m.outlineSel {
+			fg, bg = t.OverlayFG, t.OverlaySel
+			for x := ix - 1; x < ix-1+inner+2; x++ {
+				g.Set(x, iy+1+i, render.Cell{Ch: ' ', Fg: fg, Bg: bg})
+			}
+		}
+		// Selection marker + color swatch + description.
+		mark := " "
+		if m.sel[o.ID] {
+			mark = "▸"
+		}
+		g.SetString(ix, iy+1+i, mark, t.Accent, bg)
+		g.SetString(ix+2, iy+1+i, "█", o.Stroke, bg)
+		desc := describeObject(o)
+		if len(desc) > inner-8 {
+			desc = desc[:inner-8] + "…"
+		}
+		g.SetString(ix+4, iy+1+i, desc, fg, bg)
+		lname := m.doc.Layers[o.Layer].Name
+		if len(lname) > 6 {
+			lname = lname[:6]
+		}
+		g.SetString(ix+inner-len([]rune(lname)), iy+1+i, lname, t.OverlayDim, bg)
+	}
+	if len(items) == 0 {
+		g.SetString(ix, iy+1, "no matching objects", t.OverlayDim, t.OverlayBG)
+	}
+	g.SetString(ix, iy+maxRows+1, "enter select · space add · x delete · ]/[ z-order · esc", t.OverlayDim, t.OverlayBG)
 }
 
 func (m *Model) drawStencils(g *render.CellGrid) {
@@ -162,6 +252,14 @@ var helpLines = []string{
 	"  : or ctrl+p command palette    L layers    ? this help",
 	"  u/ctrl+z undo   U/ctrl+y redo  q quit",
 	"  P presentation mode (layers = slides, ←/→, esc)",
+	"  Outline (: outline): textual object navigator, keyboard-first",
+	"  cycle theme / palette from the command palette (dark/light/",
+	"    high-contrast · default/colorblind/high-contrast)",
+	"",
+	"CONFIG",
+	"  ~/.config/canvux/config.json (project ./.canvux.json overrides)",
+	"  set theme, palette, renderMode, grid/snap, autosaveSeconds, and",
+	"  rebind keys: {\"keys\": {\"ctrl+d\": \"edit.duplicate\"}}",
 	"",
 	"COLLABORATION",
 	"  host:  canvux serve file.canvux    (then share host:7878)",

@@ -23,6 +23,8 @@
 - **Precise drawing cues** — a local cursor crosshair, live `W×H` / length∠angle readouts while dragging, and animated marching-ants selection that stays visible on any color
 - **Real editor features** — undo/redo (200 levels), copy/paste, duplicate, rotate, z-order, snap-to-grid, shift-constrained drawing, multi-select, layers with lock/hide
 - **Command palette** — `:` fuzzy-searches every command (including plugin commands)
+- **Configurable & rebindable** — `~/.config/canvux/config.json` (project `./.canvux.json` overrides) sets theme, palette, render mode, grid/snap, autosave, and remaps any key to any action
+- **Accessible** — colorblind-safe (Okabe–Ito) and high-contrast palettes/themes, plus an Outline navigator (`: outline`) that lists objects as text for keyboard-first, screen-reader-friendly editing
 - **Git-friendly files** — `.canvux` is indented JSON with a versioned schema; autosaves every 30 s; `canvux diff` gives object-level diffs
 - **SVG round-trip** — export clean SVG (gradients, filters, bézier paths), import SVG shapes and paths back
 - **PNG export** — rasterized at any scale from the same renderer
@@ -78,14 +80,34 @@ Everything else is in the in-app help (`?`).
 
 `.canvux` files are indented JSON: `version`, `camera`, `layers`, `objects`, `metadata`. Forward-incompatible files are rejected by version check; missing style fields get sane defaults, so the format can grow. See [`examples/demo.canvux`](examples/demo.canvux).
 
+## Configuration
+
+Canvux reads `~/.config/canvux/config.json`, then `./.canvux.json` in the current directory (project settings override global). Every field is optional. See [`examples/config.example.json`](examples/config.example.json):
+
+```json
+{
+  "theme": "high-contrast",      // dark | light | high-contrast
+  "palette": "colorblind",       // default | colorblind | high-contrast
+  "renderMode": "braille",       // block | braille
+  "color": "auto",               // auto | truecolor | 256 | 16 | off
+  "grid": true,
+  "snap": false,
+  "autosaveSeconds": 30,
+  "keys": { "ctrl+d": "edit.duplicate", "T": "view.cycle-theme" }
+}
+```
+
+Any key can be remapped to any action ID (the palette shows each command's current key; action IDs are the stable `tool.rect`, `edit.undo`, … names). Theme and palette can also be cycled live from the command palette.
+
 ## Architecture
 
 ```
 cmd/canvux        CLI: editor, render, export, add, diff, serve, join, plugins, info
 internal/app      bubbletea model: tools, input, overlays, toolbar/status UI,
-                  presentation mode, plugin + collaboration integration
+                  actions/keymap, presentation, plugin + collaboration integration
+internal/config   layered JSON config (global + project-local)
 internal/scene    scene graph: objects, layers, hit-testing, (de)serialization
-internal/render   rasterizer (Surface interface) + cell compositors (half-block/braille) + ANSI
+internal/render   rasterizer (Surface interface) + cell compositors (half-block/braille) + ANSI + color profiles
 internal/svg      SVG export + import (gradients, filters, path flattening)
 internal/export   PNG export (image-backed Surface, micro bitmap font)
 internal/imgembed image → run-merged vector rects

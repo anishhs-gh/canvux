@@ -65,8 +65,57 @@ var LightTheme = Theme{
 	OK:         scene.Color{R: 0x3d, G: 0x84, B: 0x2f},
 }
 
-// Palette is the drawing color swatch set (Tokyo Night-ish, readable on dark).
-var Palette = []scene.Color{
+// HighContrastTheme maximizes chrome/content contrast for low-vision use:
+// near-black canvas, pure-white text, a bright-yellow accent, and a magenta
+// selection that never collides with the (blue/green/cyan) content colors.
+var HighContrastTheme = Theme{
+	CanvasBG:   scene.Color{R: 0x00, G: 0x00, B: 0x00},
+	GridDot:    scene.Color{R: 0x50, G: 0x50, B: 0x50},
+	Axis:       scene.Color{R: 0x80, G: 0x80, B: 0x80},
+	BarBG:      scene.Color{R: 0x00, G: 0x00, B: 0x00},
+	BarFG:      scene.Color{R: 0xff, G: 0xff, B: 0xff},
+	BarDim:     scene.Color{R: 0xb0, G: 0xb0, B: 0xb0},
+	Accent:     scene.Color{R: 0xff, G: 0xe4, B: 0x00},
+	AccentText: scene.Color{R: 0x00, G: 0x00, B: 0x00},
+	Selection:  scene.Color{R: 0xff, G: 0x2b, B: 0xff},
+	Handle:     scene.Color{R: 0xff, G: 0xe4, B: 0x00},
+	Marquee:    scene.Color{R: 0xff, G: 0x2b, B: 0xff},
+	OverlayBG:  scene.Color{R: 0x00, G: 0x00, B: 0x00},
+	OverlayFG:  scene.Color{R: 0xff, G: 0xff, B: 0xff},
+	OverlayDim: scene.Color{R: 0xc8, G: 0xc8, B: 0xc8},
+	OverlaySel: scene.Color{R: 0x00, G: 0x33, B: 0x66},
+	Danger:     scene.Color{R: 0xff, G: 0x40, B: 0x40},
+	OK:         scene.Color{R: 0x40, G: 0xff, B: 0x40},
+}
+
+// NamedTheme pairs a theme with a display name for cycling/config.
+type NamedTheme struct {
+	Name  string
+	Theme Theme
+}
+
+// Themes are the selectable UI themes, in cycle order.
+var Themes = []NamedTheme{
+	{"dark", DefaultTheme},
+	{"light", LightTheme},
+	{"high-contrast", HighContrastTheme},
+}
+
+// ThemeByName returns the named theme, or the default and false if unknown.
+func ThemeByName(name string) (Theme, bool) {
+	for _, t := range Themes {
+		if t.Name == name {
+			return t.Theme, true
+		}
+	}
+	return DefaultTheme, false
+}
+
+// Palette is the *active* drawing color swatch set. It is swapped in place by
+// SetActivePalette so the many call sites that read Palette[i] stay valid.
+var Palette = defaultPalette
+
+var defaultPalette = []scene.Color{
 	{R: 0xc0, G: 0xca, B: 0xf5}, // foreground
 	{R: 0x7a, G: 0xa2, B: 0xf7}, // blue
 	{R: 0x7d, G: 0xcf, B: 0xff}, // cyan
@@ -77,4 +126,59 @@ var Palette = []scene.Color{
 	{R: 0xbb, G: 0x9a, B: 0xf7}, // purple
 	{R: 0xff, G: 0xff, B: 0xff}, // white
 	{R: 0x56, G: 0x5f, B: 0x89}, // slate
+}
+
+// colorblindPalette is the Okabe–Ito colorblind-safe qualitative set, padded
+// to 10 with black and gray. Distinct under deuteranopia/protanopia/tritanopia.
+var colorblindPalette = []scene.Color{
+	{R: 0xff, G: 0xff, B: 0xff}, // white (foreground)
+	{R: 0x00, G: 0x72, B: 0xb2}, // blue
+	{R: 0x56, G: 0xb4, B: 0xe9}, // sky blue
+	{R: 0x00, G: 0x9e, B: 0x73}, // bluish green
+	{R: 0xf0, G: 0xe4, B: 0x42}, // yellow
+	{R: 0xe6, G: 0x9f, B: 0x00}, // orange
+	{R: 0xd5, G: 0x5e, B: 0x00}, // vermillion
+	{R: 0xcc, G: 0x79, B: 0xa7}, // reddish purple
+	{R: 0x00, G: 0x00, B: 0x00}, // black
+	{R: 0x99, G: 0x99, B: 0x99}, // gray
+}
+
+// contrastPalette is a maximal-luminance, maximally-separated set for the
+// high-contrast theme.
+var contrastPalette = []scene.Color{
+	{R: 0xff, G: 0xff, B: 0xff}, // white
+	{R: 0x00, G: 0x9c, B: 0xff}, // bright blue
+	{R: 0x00, G: 0xf0, B: 0xf0}, // bright cyan
+	{R: 0x00, G: 0xff, B: 0x00}, // bright green
+	{R: 0xff, G: 0xff, B: 0x00}, // bright yellow
+	{R: 0xff, G: 0x9c, B: 0x00}, // bright orange
+	{R: 0xff, G: 0x30, B: 0x30}, // bright red
+	{R: 0xff, G: 0x2b, B: 0xff}, // bright magenta
+	{R: 0xd0, G: 0xd0, B: 0xd0}, // light gray
+	{R: 0x90, G: 0x90, B: 0x90}, // mid gray
+}
+
+// NamedPalette pairs a palette with a display name.
+type NamedPalette struct {
+	Name   string
+	Colors []scene.Color
+}
+
+// Palettes are the selectable drawing palettes, in cycle order.
+var Palettes = []NamedPalette{
+	{"default", defaultPalette},
+	{"colorblind", colorblindPalette},
+	{"high-contrast", contrastPalette},
+}
+
+// SetActivePalette swaps the active drawing palette in place by name. Unknown
+// names are ignored. Returns whether the name was recognized.
+func SetActivePalette(name string) bool {
+	for _, p := range Palettes {
+		if p.Name == name {
+			Palette = p.Colors
+			return true
+		}
+	}
+	return false
 }

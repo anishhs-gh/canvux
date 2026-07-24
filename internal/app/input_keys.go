@@ -12,11 +12,12 @@ import (
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+
+	// Context-sensitive keys are handled here, not via the rebindable keymap,
+	// because their meaning depends on the current mode/selection.
 	switch key {
 	case "ctrl+c":
 		return tea.Quit
-	case "q":
-		return m.cmdQuit()
 	case "esc":
 		switch {
 		case m.polyPts != nil:
@@ -36,10 +37,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.finishPolygon()
 		}
 		return nil
-
-	// tools
-	case "v", "s":
-		m.setTool(ToolSelect)
 	case " ", "space":
 		if m.tool == ToolPan {
 			m.setTool(m.prevTool)
@@ -47,136 +44,39 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.prevTool = m.tool
 			m.setTool(ToolPan)
 		}
-	case "b":
-		m.setTool(ToolBrush)
-	case "l":
-		m.setTool(ToolLine)
-	case "r":
-		m.setTool(ToolRect)
-	case "e":
-		m.setTool(ToolEllipse)
-	case "a":
-		m.setTool(ToolArrow)
-	case "p":
-		m.setTool(ToolPolygon)
-	case "n":
-		m.setTool(ToolBezier)
-	case "t":
-		m.setTool(ToolText)
-	case "x":
-		m.setTool(ToolEraser)
-
-	// view
-	case "+", "=":
-		m.zoomAt(m.doc.Camera.Center, 1.25)
-	case "-", "_":
-		m.zoomAt(m.doc.Camera.Center, 0.8)
-	case "0":
-		m.doc.Camera.Zoom = 2
-		m.setStatus(statusInfo, "zoom 100%%")
-	case "F":
-		return m.cmdZoomFit()
-	case "g":
-		m.showGrid = !m.showGrid
-	case "G":
-		m.snap = !m.snap
-		m.setStatus(statusInfo, "snap: %v", m.snap)
-	case "M":
-		return m.cmdToggleMode()
-
-	// navigation / nudging
-	case "up", "down", "left", "right", "h", "j", "k", "shift+up", "shift+down", "shift+left", "shift+right":
+		return nil
+	case "up", "down", "left", "right", "h", "j", "k",
+		"shift+up", "shift+down", "shift+left", "shift+right":
 		return m.arrowKey(key)
-
-	// edit
-	case "u", "ctrl+z":
-		return m.cmdUndo()
-	case "U", "ctrl+y", "ctrl+r":
-		return m.cmdRedo()
-	case "d":
-		return m.cmdDuplicate()
-	case "Y":
-		return m.cmdCopy()
-	case "V":
-		return m.cmdPaste()
-	case "delete", "backspace":
-		return m.cmdDelete()
-	case "ctrl+a":
-		return m.cmdSelectAll()
 	case "tab":
 		m.cycleSelection(1)
+		return nil
 	case "shift+tab":
 		m.cycleSelection(-1)
-	case "]":
-		return m.cmdZ(true)
-	case "[":
-		return m.cmdZ(false)
-	case ".":
-		return m.cmdRotate(15)
-	case ",":
-		return m.cmdRotate(-15)
-	case ">":
-		return m.cmdRotate(1)
-	case "<":
-		return m.cmdRotate(-1)
-
-	// style
-	case "c":
-		m.overlay = ovColorStroke
-		m.colorSel = m.strokeIdx
-	case "C":
-		m.overlay = ovColorFill
-		m.colorSel = m.fillIdx
-	case "f":
-		return m.cmdToggleFill()
-	case "D":
-		return m.cmdToggleDash()
-	case "S":
-		return m.cmdToggleShadow()
-	case "B":
-		return m.cmdBlur(0.5)
-	case "ctrl+b":
-		return m.cmdBlur(-0.5)
-	case "w":
-		return m.cmdStrokeWidth(0.5)
-	case "W":
-		return m.cmdStrokeWidth(-0.5)
-	case "o":
-		return m.cmdOpacity(-0.1)
-	case "O":
-		return m.cmdOpacity(0.1)
-
-	// files / UI
-	case "ctrl+s":
-		return m.cmdSave()
-	case "ctrl+o":
-		return m.cmdOpen()
-	case "ctrl+e":
-		return m.cmdExport()
+		return nil
 	case "ctrl+p", ":":
 		m.overlay = ovPalette
 		m.palQuery = ""
 		m.palSel = 0
-	case "L":
-		m.overlay = ovLayers
-	case "i":
-		m.overlay = ovStencils
-		m.stencilQry = ""
-		m.stencilSel = 0
-	case "P":
-		return m.enterPresent()
-	case "?":
-		m.overlay = ovHelp
-		m.helpTop = 0
-	default:
-		// digits select stroke colors directly
-		if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
-			idx := int(key[0] - '1')
-			if idx < len(Palette) {
-				m.strokeIdx = idx
-				m.applyStyle("stroke color", func(o *scene.Object) { o.Stroke = Palette[idx] })
-				m.setStatus(statusInfo, "stroke color %d", idx+1)
-			}
+		return nil
+	}
+
+	// Digit keys pick a stroke color directly (not rebindable — tied to the
+	// palette index).
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+		idx := int(key[0] - '1')
+		if idx < len(Palette) {
+			m.strokeIdx = idx
+			m.applyStyle("stroke color", func(o *scene.Object) { o.Stroke = Palette[idx] })
+			m.setStatus(statusInfo, "stroke color %d", idx+1)
+		}
+		return nil
+	}
+
+	// Everything else dispatches through the (rebindable) keymap.
+	if id, ok := m.keymap[key]; ok {
+		if act, ok := actionByID(id); ok {
+			return act.Do(m)
 		}
 	}
 	return nil
@@ -340,8 +240,83 @@ func (m *Model) handleOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		return m.layersKey(key)
 	case ovStencils:
 		return m.stencilKey(msg)
+	case ovOutline:
+		return m.outlineKey(msg)
 	}
 	return nil
+}
+
+// outlineKey drives the textual object navigator (accessibility + power use).
+func (m *Model) outlineKey(msg tea.KeyMsg) tea.Cmd {
+	items := m.outlineObjects()
+	cur := func() *scene.Object {
+		if m.outlineSel >= 0 && m.outlineSel < len(items) {
+			return items[m.outlineSel]
+		}
+		return nil
+	}
+	switch msg.String() {
+	case "up", "ctrl+k":
+		m.outlineSel = maxInt(0, m.outlineSel-1)
+		m.announceOutline(items)
+	case "down", "ctrl+j":
+		m.outlineSel = minInt(maxInt(0, len(items)-1), m.outlineSel+1)
+		m.announceOutline(items)
+	case "enter":
+		if o := cur(); o != nil {
+			m.clearSelection()
+			m.sel[o.ID] = true
+			m.doc.Camera.Center = o.Bounds().Center()
+			m.overlay = ovNone
+			m.setStatus(statusOK, "selected %s", describeObject(o))
+		}
+	case " ", "space":
+		if o := cur(); o != nil {
+			if m.sel[o.ID] {
+				delete(m.sel, o.ID)
+			} else {
+				m.sel[o.ID] = true
+			}
+			m.setStatus(statusInfo, "%d selected", len(m.sel))
+		}
+	case "x", "delete":
+		if o := cur(); o != nil {
+			m.checkpoint("delete")
+			m.doc.Remove(o.ID)
+			delete(m.sel, o.ID)
+			m.setStatus(statusOK, "deleted %s", o.Kind)
+		}
+	case "]":
+		if o := cur(); o != nil {
+			m.checkpoint("z-order")
+			m.doc.Raise(o.ID)
+		}
+	case "[":
+		if o := cur(); o != nil {
+			m.checkpoint("z-order")
+			m.doc.Lower(o.ID)
+		}
+	case "backspace":
+		r := []rune(m.outlineQry)
+		if len(r) > 0 {
+			m.outlineQry = string(r[:len(r)-1])
+		}
+		m.outlineSel = 0
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.outlineQry += string(msg.Runes)
+			m.outlineSel = 0
+		}
+	}
+	return nil
+}
+
+// announceOutline writes the highlighted object to the status line, so screen
+// readers piping the terminal (and sighted users) get a textual description.
+func (m *Model) announceOutline(items []*scene.Object) {
+	if m.outlineSel >= 0 && m.outlineSel < len(items) {
+		m.setStatus(statusInfo, "%s", describeObject(items[m.outlineSel]))
+	}
 }
 
 func (m *Model) stencilKey(msg tea.KeyMsg) tea.Cmd {
@@ -406,7 +381,7 @@ func (m *Model) paletteKey(msg tea.KeyMsg) tea.Cmd {
 
 // filteredCommands fuzzy-filters the registry (plus plugin commands).
 func (m *Model) filteredCommands() []Command {
-	all := append(commands(), m.pluginCommands()...)
+	all := append(m.commands(), m.pluginCommands()...)
 	if m.palQuery == "" {
 		return all
 	}
