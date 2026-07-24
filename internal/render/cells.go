@@ -1,7 +1,6 @@
 package render
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/anishhs-gh/canvux/internal/scene"
@@ -83,8 +82,9 @@ type Cell struct {
 
 // CellGrid is the final terminal frame: a W x H grid of styled cells.
 type CellGrid struct {
-	W, H  int
-	Cells []Cell
+	W, H    int
+	Cells   []Cell
+	Profile Profile // color capability used by ANSI(); zero value = TrueColor
 }
 
 func NewCellGrid(w, h int, bg scene.Color) *CellGrid {
@@ -177,8 +177,12 @@ func brailleBit(dx, dy int) int {
 	return table[dy][dx]
 }
 
-// ANSI serializes the grid into a terminal frame string.
+// ANSI serializes the grid into a terminal frame string, degrading color to
+// the grid's Profile so non-truecolor terminals render correctly.
 func (g *CellGrid) ANSI() string {
+	if g.Profile == Mono {
+		return g.ansiMono()
+	}
 	var b strings.Builder
 	b.Grow(g.W * g.H * 8)
 	var curFg, curBg scene.Color
@@ -190,11 +194,11 @@ func (g *CellGrid) ANSI() string {
 		for x := 0; x < g.W; x++ {
 			c := g.Cells[y*g.W+x]
 			if !haveStyle || c.Fg != curFg {
-				fmt.Fprintf(&b, "\x1b[38;2;%d;%d;%dm", c.Fg.R, c.Fg.G, c.Fg.B)
+				g.Profile.writeFg(&b, c.Fg)
 				curFg = c.Fg
 			}
 			if !haveStyle || c.Bg != curBg {
-				fmt.Fprintf(&b, "\x1b[48;2;%d;%d;%dm", c.Bg.R, c.Bg.G, c.Bg.B)
+				g.Profile.writeBg(&b, c.Bg)
 				curBg = c.Bg
 			}
 			haveStyle = true
@@ -202,5 +206,21 @@ func (g *CellGrid) ANSI() string {
 		}
 	}
 	b.WriteString("\x1b[0m")
+	return b.String()
+}
+
+// ansiMono renders glyphs only, no color — for NO_COLOR / dumb terminals.
+// Empty cells (space on the background) collapse to plain spaces.
+func (g *CellGrid) ansiMono() string {
+	var b strings.Builder
+	b.Grow(g.W * g.H)
+	for y := 0; y < g.H; y++ {
+		if y > 0 {
+			b.WriteString("\r\n")
+		}
+		for x := 0; x < g.W; x++ {
+			b.WriteRune(g.Cells[y*g.W+x].Ch)
+		}
+	}
 	return b.String()
 }

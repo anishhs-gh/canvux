@@ -9,7 +9,8 @@ import (
 
 // RenderFrame rasterizes one non-interactive frame of the document, fitted to
 // its content, for `canvux render` (printing a drawing straight to stdout).
-func RenderFrame(doc *scene.Doc, cols, rows int, mode render.Mode) string {
+// Output color is degraded to the given profile (use render.DetectProfile()).
+func RenderFrame(doc *scene.Doc, cols, rows int, mode render.Mode, profile render.Profile) string {
 	t := DefaultTheme
 	sx, sy := mode.PixelScale()
 	v := render.View{W: cols * sx, H: rows * sy, Zoom: 2}
@@ -27,6 +28,7 @@ func RenderFrame(doc *scene.Doc, cols, rows int, mode render.Mode) string {
 		render.DrawObject(pb, v, o)
 	}
 	g := render.NewCellGrid(cols, rows, t.CanvasBG)
+	g.Profile = profile
 	g.Composite(pb, mode, 0, t.CanvasBG)
 
 	// Text objects at the cell layer.

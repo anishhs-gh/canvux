@@ -64,19 +64,47 @@ func main() {
 			return
 		}
 	}
+	pos, colorArg, err := extractColor(args)
+	exitOn(err)
 	path := ""
-	if len(args) > 0 {
-		path = args[0]
-		if strings.HasPrefix(path, "-") {
-			usage()
-			os.Exit(2)
-		}
+	if len(pos) > 0 {
+		path = pos[0]
+	}
+	profile, ok := render.ParseProfile(colorArg)
+	if !ok {
+		exitOn(fmt.Errorf("invalid --color %q (want auto|truecolor|256|16|off)", colorArg))
 	}
 	m, err := app.New(path)
 	exitOn(err)
+	m.SetColorProfile(profile)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	_, err = p.Run()
 	exitOn(err)
+}
+
+// extractColor pulls an optional --color=VALUE (or --color VALUE) out of args,
+// returning the remaining positional args, the color value ("" if unset), and
+// an error for any other unknown flag.
+func extractColor(args []string) (pos []string, color string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--color" || a == "-color":
+			if i+1 >= len(args) {
+				return nil, "", fmt.Errorf("--color needs a value")
+			}
+			color = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--color="):
+			color = strings.TrimPrefix(a, "--color=")
+		case strings.HasPrefix(a, "-"):
+			usage()
+			return nil, "", fmt.Errorf("unknown flag %q", a)
+		default:
+			pos = append(pos, a)
+		}
+	}
+	return pos, color, nil
 }
 
 func runExport(args []string) error {
@@ -136,8 +164,9 @@ func runRender(args []string) error {
 	cols := fs.Int("cols", 100, "output width in terminal columns")
 	rows := fs.Int("rows", 30, "output height in terminal rows")
 	braille := fs.Bool("braille", false, "use hi-res braille rendering")
+	color := fs.String("color", "auto", "color profile: auto|truecolor|256|16|off")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: canvux render <file.canvux> [--cols N] [--rows N] [--braille]")
+		fmt.Fprintln(os.Stderr, "usage: canvux render <file.canvux> [--cols N] [--rows N] [--braille] [--color auto]")
 		fs.PrintDefaults()
 	}
 	var pos, flagArgs []string
@@ -159,6 +188,10 @@ func runRender(args []string) error {
 		fs.Usage()
 		return fmt.Errorf("expected exactly one input file")
 	}
+	profile, ok := render.ParseProfile(*color)
+	if !ok {
+		return fmt.Errorf("invalid --color %q (want auto|truecolor|256|16|off)", *color)
+	}
 	doc, err := scene.Load(pos[0])
 	if err != nil {
 		return err
@@ -167,7 +200,7 @@ func runRender(args []string) error {
 	if *braille {
 		mode = render.ModeBraille
 	}
-	fmt.Println(app.RenderFrame(doc, *cols, *rows, mode))
+	fmt.Println(app.RenderFrame(doc, *cols, *rows, mode, profile))
 	return nil
 }
 
@@ -200,7 +233,8 @@ func usage() {
 	fmt.Print(`canvux — terminal-native infinite vector canvas
 
 usage:
-  canvux [file.canvux]     open the editor (creates the file on save)
+  canvux [file.canvux] [--color auto|truecolor|256|16|off]
+                           open the editor (creates the file on save)
   canvux export <file>     export to SVG and/or PNG
       --svg out.svg        SVG output path (default <input>.svg)
       --png out.png        PNG output path

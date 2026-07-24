@@ -59,6 +59,7 @@ func (m *Model) presentMouse(msg tea.MouseMsg) tea.Cmd {
 func (m *Model) viewPresent() string {
 	t := m.theme
 	g := render.NewCellGrid(m.w, m.h, t.CanvasBG)
+	g.Profile = m.profile
 	sx, sy := m.mode.PixelScale()
 	v := render.View{W: m.w * sx, H: m.h * sy, Zoom: 2}
 

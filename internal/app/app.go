@@ -105,9 +105,10 @@ type Model struct {
 	dirty bool
 	hist  history.Stack
 
-	w, h  int
-	mode  render.Mode
-	theme Theme
+	w, h    int
+	mode    render.Mode
+	theme   Theme
+	profile render.Profile
 
 	tool        Tool
 	prevTool    Tool
@@ -159,6 +160,9 @@ type Model struct {
 	// Presentation mode: layers become slides.
 	present    bool
 	presentIdx int
+
+	antPhase   int  // marching-ants animation frame
+	antRunning bool // ant heartbeat currently scheduled
 }
 
 type hitRegion struct {
@@ -166,11 +170,16 @@ type hitRegion struct {
 	action func(m *Model) tea.Cmd
 }
 
+// SetColorProfile sets the terminal color capability used when serializing
+// frames. Defaults to auto-detection when unset.
+func (m *Model) SetColorProfile(p render.Profile) { m.profile = p }
+
 // New builds the editor model, optionally loading a file.
 func New(path string) (*Model, error) {
 	m := &Model{
 		doc:         scene.NewDoc(),
 		theme:       DefaultTheme,
+		profile:     render.DetectProfile(),
 		tool:        ToolSelect,
 		strokeIdx:   1,
 		fillIdx:     3,
@@ -199,11 +208,25 @@ func autosaveCmd() tea.Cmd {
 	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg { return autosaveTick(t) })
 }
 
+// antTick drives the marching-ants selection animation.
+type antTick time.Time
+
+func antTickCmd() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg { return antTick(t) })
+}
+
+// wantsAnimation reports whether the ant heartbeat needs to keep ticking.
+func (m *Model) wantsAnimation() bool {
+	return len(m.sel) > 0 || m.drag.kind == dragMarquee || m.draft != nil || len(m.polyPts) > 0
+}
+
 func (m *Model) Init() tea.Cmd {
+	m.antRunning = true
+	cmds := []tea.Cmd{autosaveCmd(), antTickCmd()}
 	if m.collab != nil {
-		return tea.Batch(autosaveCmd(), collabTickCmd())
+		cmds = append(cmds, collabTickCmd())
 	}
-	return autosaveCmd()
+	return tea.Batch(cmds...)
 }
 
 // canvasRows is the number of terminal rows dedicated to the canvas.
@@ -323,11 +346,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pluginResult:
 		m.handlePluginResult(msg)
 		return m, nil
+	case antTick:
+		m.antPhase++
+		if m.wantsAnimation() {
+			return m, antTickCmd()
+		}
+		m.antRunning = false
+		return m, nil
 	case tea.MouseMsg:
 		if m.present {
 			return m, m.presentMouse(msg)
 		}
-		return m, m.handleMouse(msg)
+		return m, m.withAnimation(m.handleMouse(msg))
 	case tea.KeyMsg:
 		// Stale status messages clear on the next keypress.
 		if m.statusMsg != "" && time.Since(m.statusAt) > 4*time.Second {
@@ -337,17 +367,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.presentKey(msg.String())
 		}
 		if m.prompt != nil {
-			return m, m.handlePromptKey(msg)
+			return m, m.withAnimation(m.handlePromptKey(msg))
 		}
 		if m.textObj != nil {
-			return m, m.handleTextKey(msg)
+			return m, m.withAnimation(m.handleTextKey(msg))
 		}
 		if m.overlay != ovNone {
-			return m, m.handleOverlayKey(msg)
+			return m, m.withAnimation(m.handleOverlayKey(msg))
 		}
-		return m, m.handleKey(msg)
+		return m, m.withAnimation(m.handleKey(msg))
 	}
 	return m, nil
+}
+
+// withAnimation restarts the marching-ants heartbeat if an interaction just
+// created something animatable and the ticker had stopped.
+func (m *Model) withAnimation(cmd tea.Cmd) tea.Cmd {
+	if m.wantsAnimation() && !m.antRunning {
+		m.antRunning = true
+		return tea.Batch(cmd, antTickCmd())
+	}
+	return cmd
 }
 
 // --- small helpers ---

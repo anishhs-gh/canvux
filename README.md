@@ -19,6 +19,8 @@
 - **Presentation mode** — `P` turns layers into slides; plus a light "whiteboard" theme
 - **Image embedding** — import a PNG/JPEG/GIF as a run-merged grid of vector rects
 - **Two render modes** — colorful half-block cells, or hi-res braille (2×4 dots per cell), toggle with `M`
+- **Works on any terminal** — truecolor by default, auto-degrades to 256/16-color or monochrome (respects `NO_COLOR`; override with `--color`)
+- **Precise drawing cues** — a local cursor crosshair, live `W×H` / length∠angle readouts while dragging, and animated marching-ants selection that stays visible on any color
 - **Real editor features** — undo/redo (200 levels), copy/paste, duplicate, rotate, z-order, snap-to-grid, shift-constrained drawing, multi-select, layers with lock/hide
 - **Command palette** — `:` fuzzy-searches every command (including plugin commands)
 - **Git-friendly files** — `.canvux` is indented JSON with a versioned schema; autosaves every 30 s; `canvux diff` gives object-level diffs

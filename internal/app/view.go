@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +22,7 @@ func (m *Model) View() string {
 	}
 	t := m.theme
 	g := render.NewCellGrid(m.w, m.h, t.CanvasBG)
+	g.Profile = m.profile
 	v := m.view()
 	pb := render.NewPixelBuf(v.W, v.H)
 
@@ -38,8 +40,11 @@ func (m *Model) View() string {
 	m.drawMarquee(pb, v)
 
 	g.Composite(pb, m.mode, 1, t.CanvasBG)
+	m.drawSelectionAnts(g, v)
 	m.drawTexts(g, v)
 	m.drawPeers(g, v)
+	m.drawCursor(g)
+	m.drawMeasurements(g, v)
 	m.drawToolbar(g)
 	m.drawStatus(g)
 	m.drawOverlay(g)
@@ -62,6 +67,74 @@ func (m *Model) drawPeers(g *render.CellGrid, v render.View) {
 			g.Set(cx+2+i, cy, render.Cell{Ch: r, Fg: p.color, Bg: u.Bg})
 		}
 	}
+}
+
+// drawCursor draws a crosshair at the mouse cell so the local user can aim
+// precisely (the terminal's own cursor is hidden under mouse mode). It's
+// suppressed while panning and over the chrome rows.
+func (m *Model) drawCursor(g *render.CellGrid) {
+	cx, cy := m.mouseCell.X, m.mouseCell.Y
+	if cy < 1 || cy >= m.h-1 || cx < 0 || cx >= m.w {
+		return
+	}
+	if m.drag.kind == dragPan || m.overlay != ovNone || m.prompt != nil {
+		return
+	}
+	// Tool-specific glyph: a ✛ for pointer tools, a small nib for drawing.
+	glyph := '✛'
+	switch m.tool {
+	case ToolSelect, ToolPan:
+		glyph = '✛'
+	case ToolText:
+		glyph = 'I'
+	case ToolEraser:
+		glyph = '▨'
+	default:
+		glyph = '✚'
+	}
+	col := m.theme.Accent
+	if m.snap {
+		col = m.theme.Handle // amber cue that snapping is active
+	}
+	under := g.Get(cx, cy)
+	g.Set(cx, cy, render.Cell{Ch: glyph, Fg: col, Bg: under.Bg})
+}
+
+// drawMeasurements shows live dimensions/angle near the cursor while drawing
+// or resizing, so precise shapes don't require guesswork.
+func (m *Model) drawMeasurements(g *render.CellGrid, v render.View) {
+	var label string
+	switch {
+	case m.draft != nil:
+		switch m.draft.Kind {
+		case scene.KindLine, scene.KindArrow, scene.KindBezier:
+			d := m.draft.P2.Sub(m.draft.P1)
+			deg := math.Mod(math.Atan2(d.Y, d.X)*180/math.Pi+360, 360)
+			label = fmt.Sprintf(" %.1f ∠%.0f° ", d.Len(), deg)
+		case scene.KindPath:
+			label = fmt.Sprintf(" %d pts ", len(m.draft.Points))
+		default:
+			b := m.draft.Bounds()
+			label = fmt.Sprintf(" %.1f × %.1f ", b.W(), b.H())
+		}
+	case m.drag.kind == dragResize:
+		if o := m.doc.Get(m.drag.resizeID); o != nil {
+			b := o.Bounds()
+			label = fmt.Sprintf(" %.1f × %.1f ", b.W(), b.H())
+		}
+	case m.drag.kind == dragMove:
+		if b, ok := m.selectionBounds(); ok {
+			label = fmt.Sprintf(" @ %.1f, %.1f ", b.Min.X, b.Min.Y)
+		}
+	case len(m.polyPts) > 0:
+		label = fmt.Sprintf(" %d pts · enter closes ", len(m.polyPts))
+	default:
+		return
+	}
+	// Place just above-right of the cursor, clamped on screen.
+	x := clampInt(m.mouseCell.X+2, 0, m.w-len([]rune(label)))
+	y := clampInt(m.mouseCell.Y-1, 1, m.h-2)
+	g.SetString(x, y, label, m.theme.AccentText, m.theme.Accent)
 }
 
 // hairline returns a world-space stroke width that rasterizes to ~1px.
@@ -92,14 +165,8 @@ func (m *Model) drawSelection(pb *render.PixelBuf, v render.View) {
 	if len(objs) == 0 {
 		return
 	}
-	for _, o := range objs {
-		b := o.Bounds().Expand(1 / v.Zoom)
-		box := &scene.Object{
-			Kind: scene.KindRect, P1: b.Min, P2: b.Max,
-			Stroke: m.theme.Selection, StrokeWidth: m.hairline(), Opacity: 1, Dashed: true,
-		}
-		render.DrawObject(pb, v, box)
-	}
+	// (The dashed bounding box is drawn as animated marching ants at the cell
+	// layer by drawSelectionAnts; here we only draw handles and guides.)
 	// Resize handles for single selection.
 	if len(objs) == 1 {
 		b := objs[0].Bounds()
@@ -131,6 +198,72 @@ func (m *Model) drawSelection(pb *render.PixelBuf, v render.View) {
 			}
 		}
 	}
+}
+
+// drawSelectionAnts draws an animated marching-ants border (cell-aligned)
+// around each selected object's bounds. Using a moving dash pattern — not just
+// a color — keeps the selection legible even when it sits on a same-colored
+// object or under a reduced color profile.
+func (m *Model) drawSelectionAnts(g *render.CellGrid, v render.View) {
+	objs := m.selection()
+	if len(objs) == 0 {
+		return
+	}
+	sx, sy := m.mode.PixelScale()
+	toCell := func(p geom.Vec) (int, int) {
+		px := v.ToPixel(p)
+		return int(px.X) / sx, int(px.Y)/sy + 1
+	}
+	for _, o := range objs {
+		b := o.Bounds()
+		x0, y0 := toCell(b.Min)
+		x1, y1 := toCell(b.Max)
+		x0, x1 = minInt(x0, x1)-1, maxInt(x0, x1)+1
+		y0, y1 = minInt(y0, y1)-1, maxInt(y0, y1)+1
+		m.antRect(g, x0, y0, x1, y1)
+	}
+}
+
+// antRect strokes a moving dashed rectangle border at cell coordinates.
+func (m *Model) antRect(g *render.CellGrid, x0, y0, x1, y1 int) {
+	col := m.theme.Selection
+	// Perimeter index -> on/off with a phase that advances each ant tick.
+	on := func(i int) bool { return (i+m.antPhase)%3 != 0 }
+	set := func(x, y, i int, ch rune) {
+		if x < 0 || x >= m.w || y < 1 || y >= m.h-1 {
+			return
+		}
+		if on(i) {
+			g.Set(x, y, render.Cell{Ch: ch, Fg: col, Bg: g.Get(x, y).Bg})
+		}
+	}
+	i := 0
+	for x := x0; x <= x1; x++ { // top
+		set(x, y0, i, '─')
+		i++
+	}
+	for y := y0 + 1; y <= y1; y++ { // right
+		set(x1, y, i, '│')
+		i++
+	}
+	for x := x1 - 1; x >= x0; x-- { // bottom
+		set(x, y1, i, '─')
+		i++
+	}
+	for y := y1 - 1; y > y0; y-- { // left
+		set(x0, y, i, '│')
+		i++
+	}
+	// Solid corners so the frame reads as a rectangle even mid-dash.
+	corner := func(x, y int, ch rune) {
+		if x >= 0 && x < m.w && y >= 1 && y < m.h-1 {
+			g.Set(x, y, render.Cell{Ch: ch, Fg: col, Bg: g.Get(x, y).Bg})
+		}
+	}
+	corner(x0, y0, '┌')
+	corner(x1, y0, '┐')
+	corner(x0, y1, '└')
+	corner(x1, y1, '┘')
 }
 
 func (m *Model) drawMarquee(pb *render.PixelBuf, v render.View) {
@@ -293,6 +426,9 @@ func (m *Model) drawStatus(g *render.CellGrid) {
 	}
 	if m.snap {
 		flags += "snap "
+	}
+	if m.profile != render.TrueColor {
+		flags += m.profile.String() + " "
 	}
 	layer := m.doc.Layers[m.currentLayer()].Name
 	peers := ""

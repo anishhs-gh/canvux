@@ -129,6 +129,8 @@ var helpLines = []string{
 	"  right/middle-drag pan       arrows/hjkl pan view",
 	"  + - zoom     0 zoom 100%    F zoom to fit",
 	"  g grid       G snap to grid M block/braille mode",
+	"  live W×H / length∠angle shown at cursor while drawing",
+	"  colors auto-degrade to your terminal (--color to override)",
 	"",
 	"SELECT & EDIT",
 	"  click select        shift+click multi-select",
