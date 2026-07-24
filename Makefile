@@ -21,8 +21,9 @@ bench:
 demo: build
 	./canvux export examples/demo.canvux --png examples/demo.png --scale 10
 
-# Cross-compile release binaries into dist/ and write a SHA256SUMS file.
-# Binary names match what install.sh expects: canvux-<os>-<arch>[.exe].
+# Cross-compile release binaries into dist/, gzip a compact copy of each, and
+# write a SHA256SUMS file. Binary names match what install.sh expects:
+# canvux-<os>-<arch>[.exe], with a matching .gz alongside (~3x smaller).
 release:
 	@rm -rf dist && mkdir -p dist
 	@for p in $(PLATFORMS); do \
@@ -32,6 +33,7 @@ release:
 		echo "building $$out"; \
 		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 \
 			go build -ldflags "$(LDFLAGS)" -o "$$out" ./cmd/canvux || exit 1; \
+		gzip -9 -c "$$out" > "$$out.gz"; \
 	done
 	@cd dist && (command -v sha256sum >/dev/null 2>&1 && sha256sum canvux-* || shasum -a 256 canvux-*) > SHA256SUMS
 	@ls -lh dist
