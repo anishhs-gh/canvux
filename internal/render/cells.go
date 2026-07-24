@@ -47,6 +47,19 @@ func NewPixelBuf(w, h int) *PixelBuf {
 	return &PixelBuf{W: w, H: h, pix: make([]pixel, w*h)}
 }
 
+// Resize reuses the backing slice when possible, growing it only when the
+// pixel count increases, then clears it. This avoids per-frame allocation.
+func (p *PixelBuf) Resize(w, h int) {
+	n := w * h
+	if cap(p.pix) < n {
+		p.pix = make([]pixel, n)
+	} else {
+		p.pix = p.pix[:n]
+		clear(p.pix)
+	}
+	p.W, p.H = w, h
+}
+
 func (p *PixelBuf) Size() (int, int) { return p.W, p.H }
 
 // Set blends c at opacity a over the existing pixel ("over" operator).
@@ -89,10 +102,28 @@ type CellGrid struct {
 
 func NewCellGrid(w, h int, bg scene.Color) *CellGrid {
 	g := &CellGrid{W: w, H: h, Cells: make([]Cell, w*h)}
-	for i := range g.Cells {
-		g.Cells[i] = Cell{Ch: ' ', Fg: bg, Bg: bg}
-	}
+	g.fill(bg)
 	return g
+}
+
+// Reset reuses the backing slice, resizing and clearing to bg. Combined with
+// PixelBuf.Resize this lets the editor render frames without per-frame allocs.
+func (g *CellGrid) Reset(w, h int, bg scene.Color) {
+	n := w * h
+	if cap(g.Cells) < n {
+		g.Cells = make([]Cell, n)
+	} else {
+		g.Cells = g.Cells[:n]
+	}
+	g.W, g.H = w, h
+	g.fill(bg)
+}
+
+func (g *CellGrid) fill(bg scene.Color) {
+	blank := Cell{Ch: ' ', Fg: bg, Bg: bg}
+	for i := range g.Cells {
+		g.Cells[i] = blank
+	}
 }
 
 func (g *CellGrid) Set(x, y int, c Cell) {

@@ -21,10 +21,10 @@ func (m *Model) View() string {
 		return m.viewPresent()
 	}
 	t := m.theme
-	g := render.NewCellGrid(m.w, m.h, t.CanvasBG)
+	g := m.frameGrid(m.w, m.h, t.CanvasBG)
 	g.Profile = m.profile
 	v := m.view()
-	pb := render.NewPixelBuf(v.W, v.H)
+	pb := m.framePixels(v.W, v.H)
 
 	if m.showGrid {
 		render.DrawGrid(pb, v, t.GridDot, t.Axis)
@@ -49,7 +49,33 @@ func (m *Model) View() string {
 	m.drawToolbar(g)
 	m.drawStatus(g)
 	m.drawOverlay(g)
-	return g.ANSI()
+	frame := g.ANSI()
+	// Emit any one-shot terminal escape (OSC 52 clipboard) in-band, once.
+	if m.pendingOSC != "" {
+		frame += m.pendingOSC
+		m.pendingOSC = ""
+	}
+	return frame
+}
+
+// frameGrid returns the reusable cell grid, resized/cleared to (w, h).
+func (m *Model) frameGrid(w, h int, bg scene.Color) *render.CellGrid {
+	if m.grid == nil {
+		m.grid = render.NewCellGrid(w, h, bg)
+		return m.grid
+	}
+	m.grid.Reset(w, h, bg)
+	return m.grid
+}
+
+// framePixels returns the reusable pixel buffer, resized/cleared to (w, h).
+func (m *Model) framePixels(w, h int) *render.PixelBuf {
+	if m.pb == nil {
+		m.pb = render.NewPixelBuf(w, h)
+		return m.pb
+	}
+	m.pb.Resize(w, h)
+	return m.pb
 }
 
 // drawPeers renders remote collaborators' live cursors.

@@ -205,3 +205,71 @@ func TestVariableWidthStroke(t *testing.T) {
 		t.Errorf("variable width flat: thin col=%d thick col=%d", thin, thick)
 	}
 }
+
+func TestPixelBufResizeReuses(t *testing.T) {
+	pb := NewPixelBuf(10, 10)
+	pb.Set(5, 5, scene.Color{R: 200}, 1)
+	before := &pb.pix[0]
+	// Resize to a smaller/equal size should reuse the backing array and clear.
+	pb.Resize(8, 8)
+	if pb.W != 8 || pb.H != 8 {
+		t.Fatalf("resize dims = %dx%d", pb.W, pb.H)
+	}
+	if &pb.pix[0] != before {
+		t.Error("Resize reallocated when it could reuse")
+	}
+	if _, a := pb.resolve(5, 5, scene.Color{}); a != 0 {
+		t.Error("Resize did not clear existing pixels")
+	}
+	// Growing beyond capacity must allocate.
+	pb.Resize(100, 100)
+	if pb.W != 100 || len(pb.pix) != 10000 {
+		t.Errorf("grow failed: %dx%d len=%d", pb.W, pb.H, len(pb.pix))
+	}
+}
+
+func TestCellGridResetReuses(t *testing.T) {
+	bg := scene.Color{R: 1, G: 2, B: 3}
+	g := NewCellGrid(10, 4, bg)
+	g.Set(0, 0, Cell{Ch: 'X', Fg: scene.Color{R: 9}, Bg: bg})
+	before := &g.Cells[0]
+	g.Reset(8, 4, bg)
+	if g.W != 8 || g.H != 4 {
+		t.Fatalf("reset dims = %dx%d", g.W, g.H)
+	}
+	if &g.Cells[0] != before {
+		t.Error("Reset reallocated when it could reuse")
+	}
+	if g.Get(0, 0).Ch != ' ' {
+		t.Error("Reset did not clear cells")
+	}
+	// A reset grid renders identically to a fresh one.
+	fresh := NewCellGrid(8, 4, bg)
+	fresh.Profile, g.Profile = TrueColor, TrueColor
+	if g.ANSI() != fresh.ANSI() {
+		t.Error("reset grid differs from fresh grid")
+	}
+}
+
+// Demonstrates the per-frame allocation win from reusing buffers.
+func BenchmarkFrameFreshAlloc(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		pb := NewPixelBuf(240, 120)
+		g := NewCellGrid(240, 62, scene.Color{})
+		pb.Set(1, 1, scene.Color{R: 200}, 1)
+		g.Composite(pb, ModeHalfBlock, 1, scene.Color{})
+	}
+}
+
+func BenchmarkFrameReuseBuffers(b *testing.B) {
+	b.ReportAllocs()
+	pb := NewPixelBuf(240, 120)
+	g := NewCellGrid(240, 62, scene.Color{})
+	for i := 0; i < b.N; i++ {
+		pb.Resize(240, 120)
+		g.Reset(240, 62, scene.Color{})
+		pb.Set(1, 1, scene.Color{R: 200}, 1)
+		g.Composite(pb, ModeHalfBlock, 1, scene.Color{})
+	}
+}

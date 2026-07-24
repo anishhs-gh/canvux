@@ -29,7 +29,8 @@
 - **Command palette** — `:` fuzzy-searches every command (including plugin commands)
 - **Configurable & rebindable** — `~/.config/canvux/config.json` (project `./.canvux.json` overrides) sets theme, palette, render mode, grid/snap, autosave, and remaps any key to any action
 - **Accessible** — colorblind-safe (Okabe–Ito) and high-contrast palettes/themes, plus an Outline navigator (`: outline`) that lists objects as text for keyboard-first, screen-reader-friendly editing
-- **Git-friendly files** — `.canvux` is indented JSON with a versioned schema; autosaves every 30 s; `canvux diff` gives object-level diffs
+- **Git-friendly files** — `.canvux` is indented JSON with a versioned schema; autosaves with crash recovery on reopen; `canvux diff` gives object-level diffs
+- **System clipboard** — `ctrl+shift+c` copies the selection as an SVG snippet (native clipboard locally, OSC 52 over SSH) to paste into other tools
 - **SVG round-trip** — export clean SVG (gradients, filters, bézier paths), import SVG shapes and paths back
 - **PNG export** — rasterized at any scale from the same renderer
 - **Scriptable CLI** — `render`, `export`, `add`, `diff`, `serve`, `join`, `plugins`, `info` for pipelines
@@ -118,6 +119,7 @@ internal/export   PNG export (image-backed Surface, micro bitmap font)
 internal/imgembed image → run-merged vector rects
 internal/plugin   external-process plugin protocol (JSON over stdio)
 internal/collab   realtime collaboration server + client (TCP, JSON lines)
+internal/clipboard system clipboard (native tools + OSC 52 fallback)
 internal/history  snapshot undo/redo
 internal/geom     vectors, rects, transforms
 ```
